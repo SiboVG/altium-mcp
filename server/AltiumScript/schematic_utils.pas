@@ -572,6 +572,9 @@ begin
     // Send a system notification that a new component has been added to the library
     SchServer.RobotManager.SendMessage(nil, c_BroadCast, SCHM_PrimitiveRegistration, SchComponent.I_ObjectAddress);
     CurrentLib.CurrentSchComponent := SchComponent;
+    // Adding a symbol from a script does not set the library's modified
+    // flag, so closing it would drop the symbol without asking (#30)
+    MarkDocumentModified(CurrentLib.DocumentName);
 
     // Refresh library
     CurrentLib.GraphicallyInvalidate;

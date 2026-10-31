@@ -243,6 +243,8 @@ begin
             end;
         end;
 
+        if (CreatedCount > 0) and (PcbLib <> nil) then
+            MarkDocumentModified(PcbLib.Board.FileName);
         AddJSONInteger(ResultProps, 'created', CreatedCount);
         AddJSONInteger(ResultProps, 'primitive_errors', PrimErrors);
         if (FailedArray.Count > 0) then
@@ -2010,6 +2012,7 @@ begin
         PCBServer.SendMessageToRobots(PcbLib.Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, LibComp.I_ObjectAddress);
         PcbLib.CurrentComponent := LibComp;
         PcbLib.Board.ViewManager_FullUpdate;
+        MarkDocumentModified(PcbLib.Board.FileName);
 
         AddJSONBoolean(ResultProps, 'success', True);
         AddJSONProperty(ResultProps, 'footprint_name', FootprintName);
