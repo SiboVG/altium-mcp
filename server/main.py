@@ -327,10 +327,6 @@ class AltiumBridge:
 
     async def execute_command(self, command: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a command in Altium via the bridge script"""
-        # A launch sent to a hung Altium only queues up behind whatever holds
-        # its UI thread; say so now instead of after the start timeout
-        if await asyncio.to_thread(sandbox.altium_hung):
-            return {"success": False, "error": ALTIUM_HUNG_ERROR}
         async with self._command_lock:
             if not await self._exchange_lock.acquire(LOCK_TIMEOUT):
                 return {"success": False,
@@ -338,6 +334,13 @@ class AltiumBridge:
                                  f"has had a command running in Altium for over {LOCK_TIMEOUT} s. "
                                  f"Retry when it has finished."}
             try:
+                # A launch sent to a hung Altium only queues up behind whatever
+                # holds its UI thread; say so now instead of after the start
+                # timeout. Checked with the exchange lock held: while waiting
+                # for it, Altium is busy with another server's command, which
+                # is no reason to give up.
+                if await asyncio.to_thread(sandbox.altium_hung):
+                    return {"success": False, "error": ALTIUM_HUNG_ERROR}
                 return await self._execute_command_locked(command, params)
             finally:
                 self._exchange_lock.release()
