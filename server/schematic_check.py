@@ -23,6 +23,7 @@ designator and visible parameters that collides with nothing (designator left
 and value right of a vertical part, above/below a horizontal one, ...).
 """
 import math
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -799,7 +800,9 @@ def project_sheets(prjpcb) -> list:
     out = []
     for line in prj.read_text(encoding="cp1252", errors="replace").splitlines():
         if line.startswith("DocumentPath=") and line.lower().endswith(".schdoc"):
-            out.append((prj.parent / line.split("=", 1)[1]).resolve())
+            # normpath, not resolve: keep the path the way the project names
+            # it rather than whatever junction it leads through
+            out.append(Path(os.path.normpath(prj.parent / line.split("=", 1)[1])))
     return out
 
 

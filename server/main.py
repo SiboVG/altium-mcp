@@ -1837,6 +1837,10 @@ async def check_schematic(ctx: Context, path: str, max_issues_per_sheet: int = 1
 
     results, totals = [], {}
     for sheet in sheets:
+        if not Path(sheet).is_file():
+            results.append({"sheet": str(sheet),
+                            "error": "listed in the project but not on disk - save it in Altium first"})
+            continue
         try:
             r = schematic_check.check_sheet(sheet)
         except Exception as e:
