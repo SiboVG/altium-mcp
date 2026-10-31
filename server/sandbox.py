@@ -49,9 +49,11 @@ VARS_BEGIN = "// === USER VARS"
 VARS_END = "// === END USER VARS"
 EXCEPTION_PREFIX = "EXCEPTION: "   # logged by the template's except block
 GUARD_PREFIX = "LOOP GUARD: "       # logged by SandboxTick when it ends the loops
+UNDO_PREFIX = "UNDO GROUP LEFT OPEN: "  # logged by SbxCloseUndo
 LOG_TOKEN = "%LOG_PATH%"
 OUT_TOKEN = "%OUT_PATH%"
 GUARD_TOKEN = "%GUARD_SECONDS%"
+UNDO_TOKEN = "%UNDO_PATH%"
 BODY_INDENT = " " * 8
 VARS_INDENT = " " * 4
 
@@ -240,6 +242,30 @@ def guard_loops(code: str, first_line: int) -> str:
     return code
 
 
+_UNDO_RE = re.compile(r"(?<![\w.])(SchServer\s*\.\s*ProcessControl|PCBServer)\s*\.\s*(Pre|Post)Process\b",
+                      re.IGNORECASE)
+
+
+def track_undo(code: str) -> str:
+    """Route the script's PreProcess/PostProcess calls through the template's
+    SbxPreProcess/SbxPostProcess (SbxPcb... for PCBServer), which remember
+    the undo groups left open so the template can close them at the end.
+
+        SchServer.ProcessControl.PreProcess(Doc, '')  ->  SbxPreProcess(Doc, '')
+        PCBServer.PostProcess                         ->  SbxPcbPostProcess
+
+    Strings and comments are left alone, and nothing moves to another line.
+    """
+    blank = _blank_strings_and_comments(code)
+    edits = []
+    for m in _UNDO_RE.finditer(blank):
+        pcb = m.group(1).lower() == "pcbserver"
+        edits.append((m.start(), m.end(), f"Sbx{'Pcb' if pcb else ''}{m.group(2).capitalize()}Process"))
+    for start, end, new in reversed(edits):
+        code = code[:start] + new + code[end:]
+    return code
+
+
 def check_script(body_lines: List[str], extra_names: List[str], line_offset: int = 0) -> List[str]:
     """Problems that would stop the script from compiling, found before Altium sees it.
 
@@ -272,18 +298,19 @@ class BuiltScript:
 
 
 def build_script(template: str, script: str, log_path: str, out_path: str,
-                 guard_seconds: int = 60) -> BuiltScript:
+                 guard_seconds: int = 60, undo_path: str = "") -> BuiltScript:
     """Fill the template: user declarations, script body with its loops
-    guarded, the log/result paths and the loop guard's deadline."""
+    guarded and its undo groups tracked, the log/result/undo paths and the
+    loop guard's deadline."""
     split = split_var_block(script)
     decls = split.decls
-    body = guard_loops("\n".join(split.body), split.body_offset + 1).split("\n")
+    body = track_undo(guard_loops("\n".join(split.body), split.body_offset + 1)).split("\n")
     if template.count(BODY_BEGIN) != 1 or template.count(BODY_END) != 1:
         raise ValueError("template must contain the experiment markers exactly once")
     if template.count(VARS_BEGIN) != 1 or template.count(VARS_END) != 1:
         raise ValueError("template must contain the user-vars markers exactly once")
     text = (template.replace(LOG_TOKEN, log_path).replace(OUT_TOKEN, out_path)
-            .replace(GUARD_TOKEN, str(int(guard_seconds))))
+            .replace(GUARD_TOKEN, str(int(guard_seconds))).replace(UNDO_TOKEN, undo_path))
 
     def fill(src, begin, end, lines, indent):
         pre, rest = src.split(begin, 1)
@@ -470,6 +497,12 @@ class RunFiles:
     log: Path
     result: Path
 
+    @property
+    def undo(self) -> Path:
+        """Undo groups the script has open, one per line, kept current by the
+        template while it runs."""
+        return self.script.with_name(self.script.stem + "_undo.txt")
+
 
 @dataclass
 class Sandbox:
@@ -487,7 +520,7 @@ class Sandbox:
 
     def write(self, files: RunFiles, script: str, guard_seconds: int = 60) -> BuiltScript:
         built = build_script(self.template.read_text(encoding="utf-8"), script, str(files.log),
-                             str(files.result), guard_seconds)
+                             str(files.result), guard_seconds, str(files.undo))
         files.script.write_text(built.text, encoding="utf-8")
         return built
 
@@ -499,10 +532,8 @@ class Sandbox:
     def stop_debugger(self) -> None:
         subprocess.Popen(f'"{self.altium_exe}" -REditScript:Stop', shell=True)
 
-    def probe(self, timeout: float = 15.0) -> bool:
-        """Run a trivial script and report whether it finished."""
-        files = self.new_run_files("Probe")
-        self.write(files, "ResultText := 'probe';")
+    def _run_until_done(self, files: RunFiles, script: str, timeout: float) -> bool:
+        self.write(files, script)
         self.launch(files)
         end = time.time() + timeout
         while time.time() < end:
@@ -513,6 +544,35 @@ class Sandbox:
                     answer_dialog(d)
             time.sleep(0.5)
         return False
+
+    def probe(self, timeout: float = 15.0) -> bool:
+        """Run a trivial script and report whether it finished."""
+        return self._run_until_done(self.new_run_files("Probe"), "ResultText := 'probe';", timeout)
+
+    def close_leftover_undo(self, files: RunFiles, timeout: float = 15.0) -> List[str]:
+        """Close the undo groups a script left open when it died before its
+        end (stopped in the debugger), from the list it kept in files.undo.
+        Returns what was closed."""
+        try:
+            open_groups = [ln.strip() for ln in files.undo.read_text(encoding="utf-8", errors="replace")
+                           .splitlines() if ln.strip()]
+        except OSError:
+            return []
+        if not open_groups:
+            return []
+        lines = []
+        for entry in reversed(open_groups):
+            kind, _, path = entry.partition("|")
+            if kind == "PCB":
+                lines.append("PCBServer.PostProcess;")
+            else:
+                quoted = path.replace("'", "''")
+                lines += [f"Obj1 := SchServer.GetSchDocumentByPath('{quoted}');",
+                          "if Obj1 <> nil then SchServer.ProcessControl.PostProcess(Obj1, '');"]
+        lines.append("ResultText := 'closed';")
+        if self._run_until_done(self.new_run_files("Undo"), "\n".join(lines), timeout):
+            return open_groups
+        return []
 
     def recover(self, attempts: int = 3) -> dict:
         """Answer Altium's error boxes, stop the debugger and confirm with a probe run.
@@ -541,7 +601,8 @@ class Sandbox:
         try:
             files = sorted(self.runs_dir.glob("*.pas"), key=lambda p: p.stat().st_mtime)
             for old in files[:-self.keep_runs]:
-                for p in (old, old.with_name(old.stem + "_log.txt"), old.with_name(old.stem + "_result.txt")):
+                for p in (old, old.with_name(old.stem + "_log.txt"), old.with_name(old.stem + "_result.txt"),
+                          old.with_name(old.stem + "_undo.txt")):
                     try:
                         p.unlink()
                     except OSError:

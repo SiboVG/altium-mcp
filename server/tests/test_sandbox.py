@@ -154,6 +154,53 @@ class LoopGuardTest(unittest.TestCase):
         self.assertIn("'" + sandbox.GUARD_PREFIX, TEMPLATE)
 
 
+class UndoGroupTest(unittest.TestCase):
+    def test_pre_and_post_process_routed_through_template(self):
+        code = ("SchServer.ProcessControl.PreProcess(Doc, '');\n"
+                "PCBServer.PreProcess;\n"
+                "PcbServer . PostProcess;\n"
+                "schserver.processcontrol.postprocess(Doc, '');")
+        self.assertEqual(sandbox.track_undo(code),
+                         "SbxPreProcess(Doc, '');\nSbxPcbPreProcess;\nSbxPcbPostProcess;\nSbxPostProcess(Doc, '');")
+
+    def test_strings_comments_and_other_names_untouched(self):
+        code = ("S1 := 'SchServer.ProcessControl.PreProcess';\n// PCBServer.PostProcess\n"
+                "MySchServer.ProcessControl.PreProcess(D);\nObj1.PCBServer.PreProcess;")
+        self.assertEqual(sandbox.track_undo(code), code)
+
+    def test_build_tracks_body_and_fills_undo_path(self):
+        b = sandbox.build_script(TEMPLATE, "SchServer.ProcessControl.PreProcess(Obj1, '');",
+                                 r"C:\x\log.txt", r"C:\x\out.txt", undo_path=r"C:\x\undo.txt")
+        self.assertNotIn(sandbox.UNDO_TOKEN, b.text)
+        self.assertIn(r"SbxUndoPath := 'C:\x\undo.txt';", b.text)
+        self.assertEqual(b.text.splitlines()[b.body_first_line - 1], "        SbxPreProcess(Obj1, '');")
+
+    def test_template_closes_groups_after_the_except_block(self):
+        for name in ("procedure SbxPreProcess(", "procedure SbxPostProcess(", "procedure SbxPcbPreProcess;",
+                     "procedure SbxPcbPostProcess;", "procedure SbxCloseUndo;"):
+            self.assertIn(name, TEMPLATE)
+        self.assertIn("'" + sandbox.UNDO_PREFIX, TEMPLATE)
+        # after the except block, so a script that failed still has its groups closed
+        run = TEMPLATE[TEMPLATE.index("procedure Run;"):]
+        self.assertLess(run.index("ExceptionMessage"), run.index("SbxCloseUndo;"))
+        self.assertLess(run.index("SbxCloseUndo;"), run.index("SandboxLog('sandbox end');"))
+
+    def test_close_leftover_undo_builds_cleanup_from_list(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            sb = sandbox.Sandbox("x2.exe", Path("t.pas"), Path(d))
+            files = sb.new_run_files()
+            files.undo.write_text("SCH|C:\\a\\It's.SchDoc\nPCB|\n", encoding="utf-8")
+            ran = []
+            sb._run_until_done = lambda f, script, timeout: ran.append(script) or True
+            self.assertEqual(sb.close_leftover_undo(files), ["SCH|C:\\a\\It's.SchDoc", "PCB|"])
+            # newest first, the quote doubled
+            self.assertEqual(ran[0].splitlines()[:2],
+                             ["PCBServer.PostProcess;", "Obj1 := SchServer.GetSchDocumentByPath('C:\\a\\It''s.SchDoc');"])
+            files.undo.write_text("", encoding="utf-8")
+            self.assertEqual(sb.close_leftover_undo(files), [])
+
+
 class MapLineTest(unittest.TestCase):
     def test_body_line(self):
         b = build("S1 := 'a';\nS2 := Undeclared;")

@@ -1370,6 +1370,14 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
       for loops are not guarded.
     - The sandbox is standalone: helpers and constants from the production
       units (TrimJSON, AddJSONProperty, ...) are NOT available; REPLACEALL is.
+    - Undo: wrap each edit in SchServer.ProcessControl.PreProcess(Doc, '') /
+      PostProcess(Doc, '') (PCBServer.PreProcess / PostProcess on a PCB), and
+      report changes to the robot manager (SCHM_PrimitiveRegistration for a new
+      object, SCHM_BeginModify / SCHM_EndModify around a change). An undo group
+      left open makes the user's own later edits in that document impossible
+      to undo until Altium restarts, so the sandbox closes any group the script
+      leaves open, even after an error, and reports it as
+      "undo_groups_closed": fix the script when you see it.
     - Never register objects into a library document and never write to shared
       or network library paths. Verify the target document kind first
       (ObjectID 32 = schematic, 33 = symbol library).
@@ -1460,6 +1468,13 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
         _clear_script_stuck()  # our script ran to the end: Altium is free
         result_text = sandbox.read_when_ready(files.result, read_altium_text).strip()
         sb.prune()
+        closed = [s[len(sandbox.UNDO_PREFIX):] for s in steps if s.startswith(sandbox.UNDO_PREFIX)]
+        if closed:
+            report["undo_groups_closed"] = closed
+            report["undo_warning"] = (
+                "The script called PreProcess without a matching PostProcess (or failed between "
+                "them). The sandbox closed the group so the user can still undo their own edits "
+                "in that document; pair every PreProcess with a PostProcess.")
         guard = next((s for s in steps if s.startswith(sandbox.GUARD_PREFIX)), None)
         if guard is not None:
             m = re.search(r"line (\d+)", guard)
@@ -1494,6 +1509,12 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
         recovery = await asyncio.to_thread(sb.recover)
         if recovery["recovered"]:
             _clear_script_stuck()
+            # The script stopped before its end, so the template could not
+            # close the undo groups it had opened; a group left open makes
+            # the user's own edits in that document impossible to undo
+            closed = await asyncio.to_thread(sb.close_leftover_undo, files)
+            if closed:
+                report["undo_groups_closed"] = closed
         started = bool(steps)
         return json.dumps({
             "success": False,
