@@ -110,6 +110,15 @@ class LintTest(unittest.TestCase):
         script = "S1 := 'List1.Free';\n// Obj1.Tag := 1\n{ SCHM_PrimitiveRegistration }\nS2 := 'x.Tag';"
         self.assertEqual(self.lint(script), [])
 
+    def test_robot_manager_registration_allowed(self):
+        # The production units and the run_altium_script docstring use it to
+        # report a new object; registering a placed net label works
+        script = ("SchServer.ProcessControl.PreProcess(Obj1, '');\n"
+                  "SchServer.RobotManager.SendMessage(Obj1.I_ObjectAddress, c_BroadCast, "
+                  "SCHM_PrimitiveRegistration, Obj2.I_ObjectAddress);\n"
+                  "SchServer.ProcessControl.PostProcess(Obj1, '');")
+        self.assertEqual(self.lint(script), [])
+
     def test_unbalanced_preprocess(self):
         problems = self.lint("SchServer.ProcessControl.PreProcess(Obj1, '');\nObj1.GraphicallyInvalidate;")
         self.assertEqual(len(problems), 1)

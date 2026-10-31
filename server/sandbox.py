@@ -295,9 +295,6 @@ def check_script(body_lines: List[str], extra_names: List[str], line_offset: int
 # history broken until Altium is restarted, and some of these calls take Altium
 # down without raising anything the script could catch.
 KNOWN_CRASHES = [
-    (r"\bSCHM_PrimitiveRegistration\b",
-     "RobotManager.SendMessage(.., SCHM_PrimitiveRegistration, ..) crashed Altium for a new "
-     "object; AddSchObject, save and reload the document instead"),
     (r"\bGetState_DescriptionString\b", "crashes when called on objects from a schematic iterator"),
     (r"\bBoundingRectangle\b", "a record: reading its fields crashes"),
     (r"\.Corner\b(?!\s*:=)", "reading .Corner crashes; writing '.Corner := Point(..)' works"),
