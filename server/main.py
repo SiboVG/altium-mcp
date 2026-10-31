@@ -841,7 +841,9 @@ async def create_schematic_symbol(ctx: Context, symbol_name: str, description: s
                     "pin_number|pin_name|pin_type|pin_orientation|x|y[|owner_part_id[|length[|show_name[|show_designator]]]]"
                     Pin types: eElectricHiZ, eElectricInput, eElectricIO, eElectricOpenCollector,
                                eElectricOpenEmitter, eElectricOutput, eElectricPassive, eElectricPower
-                    Pin orientations: eRotate0 (right), eRotate90 (down), eRotate180 (left), eRotate270 (up)
+                    Pin orientations: eRotate0 (right), eRotate90 (up), eRotate180 (left), eRotate270 (down)
+                    x, y is where the pin meets the body; the pin extends from there
+                    in its orientation's direction (left-side pins eRotate180, top pins eRotate90)
                     X,Y coordinates in mils
                     owner_part_id (optional): Part number the pin belongs to (1-based).
                                Use 0 for pins shared across all parts (e.g. power/GND).

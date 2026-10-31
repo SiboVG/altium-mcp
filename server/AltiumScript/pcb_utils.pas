@@ -1864,6 +1864,7 @@ begin
     try
         LibComp := PCBServer.CreatePCBLibComp;
         LibComp.Name := FootprintName;
+        LibComp.Description := Description;
 
         PcbLib.RegisterComponent(LibComp);
 
