@@ -1803,6 +1803,12 @@ async def check_schematic(ctx: Context, path: str, max_issues_per_sheet: int = 1
         bottom-right (2) when the wire ends to the right, bottom-left (0)
         when it ends to the left. A middle-justified (3/5) label anchored on
         the end, reading outward like a port, is also accepted.
+      * sheet_entry_margin - a sheet symbol's first entry sits well below its
+        top edge. Altium's default is one grid (100 mil; 3 mm on a 1 mm grid);
+        extra room at the bottom is fine.
+      * sheet_symbol_text - a sheet symbol's designator or file name is not
+        above it. Both go above: file name on the top edge, designator a line
+        (100 mil) above it, both bottom-left justified at the left edge.
       * label_orientation, label_off_wire, dangling_wire, wire_through_body.
       * text_overlap - a designator, parameter, net label or port text
         overlapping a wire, a pin, a part or other text. For part text the

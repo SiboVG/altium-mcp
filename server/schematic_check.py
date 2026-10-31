@@ -11,6 +11,8 @@ The sheet is read with schdoc_reader and every check works on its geometry:
   pin_tap             a wire branches right at a pin instead of a few grids
                       away from it (a decoupling cap sitting on its rail)
   wire_through_body   a wire crossing a component's drawn body
+  sheet_entry_margin  a sheet symbol's first entry well below its top edge
+  sheet_symbol_text   a sheet symbol's designator or file name not above it
   text_overlap        a designator, parameter, label or port text overlapping
                       a wire, a pin, a body or other text
 
@@ -196,6 +198,7 @@ class Sheet:
         self.labels = []       # net labels
         self.attach = []       # points a wire end may legitimately end on
         self.glyphs = []       # {owner, box}: power-port and connector symbols
+        self.sheet_symbols = {}  # record index -> {box, entries, name, file}
         self._parse()
 
     def text_size(self, text, font_id):
@@ -307,6 +310,23 @@ class Sheet:
                 box = Box(coord(r, "LOCATION.X"), coord(r, "LOCATION.Y") - coord(r, "YSIZE"),
                           coord(r, "LOCATION.X") + coord(r, "XSIZE"), coord(r, "LOCATION.Y"))
                 self.glyphs.append({"owner": "sheet symbol", "box": box, "sheet_symbol": True})
+                self.sheet_symbols[i] = {"box": box, "entries": [], "name": None, "file": None}
+            elif kind == "16" and owner in self.sheet_symbols:
+                # DistanceFromTop is in 100 mil units, with a millionths part
+                dist = (int(r.get("DISTANCEFROMTOP", 0) or 0)
+                        + int(r.get("DISTANCEFROMTOP_FRAC1", 0) or 0) / 1e6) * 100.0
+                self.sheet_symbols[owner]["entries"].append(
+                    {"name": r.get("NAME", ""), "side": int(r.get("SIDE", 0) or 0), "distance": dist})
+            elif kind in ("32", "33") and owner in self.sheet_symbols:
+                text = r.get("TEXT", "")
+                x, y = coord(r, "LOCATION.X"), coord(r, "LOCATION.Y")
+                o, j = int(r.get("ORIENTATION", 0) or 0), int(r.get("JUSTIFICATION", 0) or 0)
+                w, h = self.text_size(text, r.get("FONTID", 1))
+                t = {"kind": "sheet designator" if kind == "32" else "sheet file name", "owner": None,
+                     "text": text, "anchor": (x, y), "box": text_box(x, y, w, h, o, j)}
+                self.sheet_symbols[owner]["name" if kind == "32" else "file"] = t
+                if text and r.get("ISHIDDEN") != "T":
+                    self.texts.append(t)
             elif kind == "4" and owner is None:
                 text = r.get("TEXT", "")
                 if text and not r.get("ISHIDDEN") == "T":
@@ -771,14 +791,45 @@ class Checker:
                            y + (g if y > b.t else -g if y < b.b else 0), j) for x, y, j in layout]))
         return out + more
 
+    def check_sheet_symbols(self):
+        """Altium's own layout: the first entry one grid (100 mil, or the next
+        grid step on a metric sheet) below the top edge, and both the
+        designator and the file name above the symbol, file name on the edge
+        and designator a line above it. The bottom may keep more room."""
+        want = math.ceil(100.0 / self.grid - 1e-6) * self.grid
+        line = 100.0
+        for sym in self.s.sheet_symbols.values():
+            box = sym["box"]
+            label = (sym["name"] or {}).get("text") or "sheet symbol"
+            sides = [e for e in sym["entries"] if e["side"] in (0, 1)]
+            if sides:
+                first = min(e["distance"] for e in sides)
+                if first > want + self.grid / 2:
+                    self.add("sheet_entry_margin", (box.l, box.t - first),
+                             f"the first entry of {label} is {self.fmt(first)} {self.unit} below the top edge; "
+                             f"move the entries up by {self.fmt(first - want)} {self.unit} so it sits "
+                             f"{self.fmt(want)} {self.unit} from the edge",
+                             sheet_symbol=label, suggest={"first_entry_from_top": self.fmt(want),
+                                                          "move_entries_up": self.fmt(first - want)})
+            below = [t for t in (sym["name"], sym["file"]) if t and t["box"].b < box.t - TOL]
+            if below:
+                self.add("sheet_symbol_text", below[0]["anchor"],
+                         f"{' and '.join(t['kind'] for t in below)} of {label} not above the symbol; "
+                         "put the file name on the top edge and the designator a line above it",
+                         sheet_symbol=label,
+                         suggest={"file_name": {"x": self.fmt(box.l), "y": self.fmt(box.t), "justification": 0},
+                                  "designator": {"x": self.fmt(box.l), "y": self.fmt(box.t + line),
+                                                 "justification": 0}})
+
     def run(self):
         self.check_labels()
         self.check_dangling()
         self.check_pin_taps()
         self.check_bodies()
         self.check_text()
+        self.check_sheet_symbols()
         order = ["pin_tap", "label_not_at_end", "label_justification", "label_orientation", "label_off_wire",
-                 "dangling_wire", "wire_through_body", "text_overlap"]
+                 "dangling_wire", "wire_through_body", "sheet_entry_margin", "sheet_symbol_text", "text_overlap"]
         self.issues.sort(key=lambda i: (order.index(i["type"]), -i["at"][1], i["at"][0]))
         return self.issues
 

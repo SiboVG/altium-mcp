@@ -216,10 +216,18 @@ text. For a vertical two-pin part with nets above and below, put the
 designator left of the body and the value right of it rather than stacking
 both on one side, where they run into the rail.
 
-## 15. Check the saved sheet
+## 15. Sheet symbols: entries close to the top, text above
+
+Keep Altium's default look. The first sheet entry sits one grid below the
+top edge (100 mil, or 3 mm on a 1 mm grid), not several grids down; the
+bottom may keep more room. The designator and the file name both go above
+the symbol, bottom-left justified at its left edge: the file name on the top
+edge and the designator one line (100 mil) above it.
+
+## 16. Check the saved sheet
 
 `check_schematic` (server/schematic_check.py) reads a saved `.SchDoc`, a
-`.PrjPcb` or a folder without Altium and reports rules 3, 6, 8, 13 and 14
+`.PrjPcb` or a folder without Altium and reports rules 3, 6, 8, 13, 14 and 15
 with coordinates, plus suggested label positions and a text arrangement
 that collides with nothing. Run it after every drawing pass.
 

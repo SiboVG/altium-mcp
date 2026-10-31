@@ -205,6 +205,31 @@ class CheckTest(unittest.TestCase):
                          ["dangling_wire", "label_justification", "label_not_at_end", "pin_tap", "text_overlap"])
 
 
+class SheetSymbolTest(unittest.TestCase):
+    def check(self, distance, file_y):
+        recs = [
+            {"HEADER": "x"},
+            {"RECORD": 31, "FONTIDCOUNT": 1, "SIZE1": 10, "FONTNAME1": "Times New Roman", "SNAPGRIDSIZE": 10},
+            {"RECORD": 15, **at(1000, 2000), "XSIZE": 100, "YSIZE": 80},
+            # DistanceFromTop in 100 mil units
+            {"RECORD": 16, "OWNERINDEX": 1, "SIDE": 0, "DISTANCEFROMTOP": distance, "NAME": "A"},
+            {"RECORD": 16, "OWNERINDEX": 1, "SIDE": 1, "DISTANCEFROMTOP": distance + 1, "NAME": "B"},
+            {"RECORD": 32, "OWNERINDEX": 1, **at(1000, 2100), "TEXT": "U_SUB", "FONTID": 1},
+            {"RECORD": 33, "OWNERINDEX": 1, **at(1000, file_y), "TEXT": "Sub.SchDoc", "FONTID": 1},
+        ]
+        return sc.Checker(sc.Sheet(parse_records(records_stream(recs)))).run()
+
+    def test_altium_default_layout_passes(self):
+        self.assertEqual(self.check(1, 2000), [])
+
+    def test_deep_first_entry_and_file_name_below(self):
+        issues = {i["type"]: i for i in self.check(6, 1100)}
+        self.assertEqual(sorted(issues), ["sheet_entry_margin", "sheet_symbol_text"])
+        self.assertEqual(issues["sheet_entry_margin"]["suggest"],
+                         {"first_entry_from_top": 100, "move_entries_up": 500})
+        self.assertEqual(issues["sheet_symbol_text"]["suggest"]["file_name"], {"x": 1000, "y": 2000, "justification": 0})
+
+
 class TextBoxTest(unittest.TestCase):
     def test_justification_and_rotation(self):
         b = sc.text_box(0, 0, 100, 10, 0, 0)
