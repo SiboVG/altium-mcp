@@ -1081,13 +1081,19 @@ async def get_pcb_layers(ctx: Context) -> str:
     return json.dumps(layers_data, indent=2)
 
 @mcp.tool()
-async def set_pcb_layer_visibility(ctx: Context, layer_names: list, visible: bool) -> str:
+async def set_pcb_layer_visibility(ctx: Context, layer_names: list, visible: bool, exclusive: bool = True) -> str:
     """
     Set visibility for specified PCB layers
-    
+
+    Showing layers is exclusive by default: the listed layers are shown and
+    every other layer is hidden, which suits a screenshot of just those
+    layers. Pass exclusive=False to show the listed layers and leave the rest
+    as they are. Hiding only ever hides the listed layers.
+
     Args:
         layer_names (list): List of layer names to modify (e.g., ["Top Layer", "Bottom Layer", "Mechanical 1"])
         visible (bool): Whether to show (True) or hide (False) the specified layers
+        exclusive (bool): With visible=True, hide every layer not listed (default True)
         
     Returns:
         str: JSON object with the result of the operation
@@ -1099,7 +1105,8 @@ async def set_pcb_layer_visibility(ctx: Context, layer_names: list, visible: boo
         "set_pcb_layer_visibility",
         {
             "layer_names": layer_names,
-            "visible": visible
+            "visible": visible,
+            "exclusive": exclusive
         }
     )
     

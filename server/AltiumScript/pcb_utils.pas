@@ -1,3 +1,7 @@
+const
+    // Mechanical 1 to 1024: Altium numbers mechanical layers past 32
+    MAX_MECH_LAYERS = 1024;
+
 // Nil-safe access to the current PCB board. When no PCB document has ever
 // been opened this session, PCBServer itself is nil and calling
 // GetCurrentPCBBoard on it throws an access violation that leaves the
@@ -749,7 +753,7 @@ begin
                 AddJSONProperty(LayerProps, 'layer_id', Layer2String(LayerObject.LayerID));
                 AddJSONProperty(LayerProps, 'material_type', 'Copper');
                 AddJSONNumber(LayerProps, 'copper_thickness_mils', LayerObject.CopperThickness / 10000);
-                AddJSONNumber(LayerProps, 'copper_thickness_um', LayerObject.CopperThickness / 254);
+                AddJSONNumber(LayerProps, 'copper_thickness_um', LayerObject.CopperThickness * 0.00254);
                 
                 // Add copper thickness to total
                 TotalThickness := TotalThickness + (LayerObject.CopperThickness / 10000);
@@ -767,7 +771,7 @@ begin
                     
                     AddJSONProperty(LayerProps, 'dielectric_material', LayerObject.Dielectric.DielectricMaterial);
                     AddJSONNumber(LayerProps, 'dielectric_height_mils', LayerObject.Dielectric.DielectricHeight / 10000);
-                    AddJSONNumber(LayerProps, 'dielectric_height_um', LayerObject.Dielectric.DielectricHeight / 254);
+                    AddJSONNumber(LayerProps, 'dielectric_height_um', LayerObject.Dielectric.DielectricHeight * 0.00254);
                     AddJSONNumber(LayerProps, 'dielectric_constant', LayerObject.Dielectric.DielectricConstant);
                     
                     // Add dielectric thickness to total
@@ -895,26 +899,27 @@ begin
             LayerObj := TheLayerStack.NextLayer(LayerObj);
         end;
         
-        // Process mechanical layers
-        for i := 1 to 32 do
+        // Process mechanical layers. Keyed by the layer number: V6 ids only
+        // reach Mechanical 16, and every layer above reads 72 (#32)
+        for i := 1 to MAX_MECH_LAYERS do
         begin
             MechLayer := TheLayerStack.LayerObject_V7[ILayer.MechanicalLayer(i)];
-            
-            if MechLayer.MechanicalLayerEnabled then
+
+            if (MechLayer <> nil) and MechLayer.MechanicalLayerEnabled then
             begin
                 // Create layer properties
                 LayerProps := TStringList.Create;
                 try
                     // Add properties
                     AddJSONProperty(LayerProps, 'name', MechLayer.Name);
-                    AddJSONProperty(LayerProps, 'layer_id', IntToStr(MechLayer.V6_LayerID));
+                    AddJSONProperty(LayerProps, 'layer_id', IntToStr(ILayer.MechanicalLayer(i)));
                     AddJSONProperty(LayerProps, 'layer_type', 'mechanical');
                     AddJSONProperty(LayerProps, 'mechanical_number', IntToStr(i));
                     AddJSONBoolean(LayerProps, 'is_displayed', MechLayer.IsDisplayed[Board]);
                     AddJSONBoolean(LayerProps, 'is_enabled', MechLayer.MechanicalLayerEnabled);
                     AddJSONBoolean(LayerProps, 'link_to_sheet', MechLayer.LinkToSheet);
                     AddJSONBoolean(LayerProps, 'is_paired', Board.MechanicalPairs.LayerUsed(ILayer.MechanicalLayer(i)));
-                    AddJSONProperty(LayerProps, 'color', ColorToString(PCBServer.SystemOptions.LayerColors[MechLayer.V6_LayerID]));
+                    AddJSONProperty(LayerProps, 'color', ColorToString(PCBServer.SystemOptions.LayerColors[ILayer.MechanicalLayer(i)]));
                     
                     // If layer is paired, add the pair information
                     if Board.MechanicalPairs.LayerUsed(ILayer.MechanicalLayer(i)) then
@@ -1079,12 +1084,9 @@ begin
             AddJSONInteger(LayerProps, 'signal_layers_count', TheLayerStack.SignalLayerCount);
             AddJSONInteger(LayerProps, 'internal_planes_count', TheLayerStack.LayersInStackCount - TheLayerStack.SignalLayerCount);
             
-            // Get the number of enabled mechanical layers
-            i := 0;
-            for i := 1 to 32 do
-                if TheLayerStack.LayerObject_V7[ILayer.MechanicalLayer(i)].MechanicalLayerEnabled then
-                    i := i + 1;
-            AddJSONInteger(LayerProps, 'mechanical_layers_count', i);
+            // The enabled mechanical layers listed above. (Counting with the
+            // loop's own variable reported 33 whatever the board had.)
+            AddJSONInteger(LayerProps, 'mechanical_layers_count', MechArray.Count);
             
             // Add the layer arrays
             LayerProps.Add(BuildJSONArray(CopperArray, 'copper_layers'));
@@ -1114,7 +1116,7 @@ end;
 // Function to set layer visibility with two modes:
 // - visible=true: Show only specified layers, hide all others
 // - visible=false: Hide specified layers, leave others unchanged
-function SetPCBLayerVisibility(LayerNamesList: TStringList; Visible: Boolean): String;
+function SetPCBLayerVisibility(LayerNamesList: TStringList; Visible: Boolean; Exclusive: Boolean): String;
 var
     Board          : IPCB_Board;
     TheLayerStack  : IPCB_LayerStack_V7;
@@ -1128,6 +1130,7 @@ var
     FoundCount     : Integer;
     NotFoundList   : TStringList;
     FoundLayers    : TStringList;
+    MechFound      : Boolean;
 begin
     // Retrieve the current board
     Board := GetBoardSafe(0);
@@ -1204,28 +1207,31 @@ begin
             if (LayerObj <> nil) then
                 continue;
             
-            // Check mechanical layers (they can have custom names)
-            for j := 1 to 32 do
+            // Check mechanical layers (they can have custom names). Keyed by
+            // layer number, as their V6 ids repeat above Mechanical 16
+            MechFound := False;
+            for j := 1 to MAX_MECH_LAYERS do
             begin
                 MechLayer := TheLayerStack.LayerObject_V7[ILayer.MechanicalLayer(j)];
                 
-                if MechLayer.MechanicalLayerEnabled and (MechLayer.Name = LayerName) then
+                if (MechLayer <> nil) and MechLayer.MechanicalLayerEnabled and (MechLayer.Name = LayerName) then
                 begin
-                    FoundLayers.Add(IntToStr(MechLayer.V6_LayerID));
+                    FoundLayers.Add(IntToStr(ILayer.MechanicalLayer(j)));
                     FoundCount := FoundCount + 1;
+                    MechFound := True;
                     break;
                 end;
             end;
             
             // If we've checked all layer types and didn't find a match, add to not found list
-            if j > 32 then
+            if not MechFound then
                 NotFoundList.Add('"' + JSONEscapeString(LayerName) + '"');
         end;
         
         // Second phase: set visibility for all layers based on mode
-        if Visible then
+        if Visible and Exclusive then
         begin
-            // Visibility mode: show only specified layers, hide all others
+            // Show only the specified layers, hide all others
             
             // For copper layers
             LayerObj := TheLayerStack.FirstLayer;
@@ -1241,13 +1247,13 @@ begin
             end;
             
             // For mechanical layers
-            for j := 1 to 32 do
+            for j := 1 to MAX_MECH_LAYERS do
             begin
                 MechLayer := TheLayerStack.LayerObject_V7[ILayer.MechanicalLayer(j)];
                 
-                if MechLayer.MechanicalLayerEnabled then
+                if (MechLayer <> nil) and MechLayer.MechanicalLayerEnabled then
                 begin
-                    if (FoundLayers.IndexOf(IntToStr(MechLayer.V6_LayerID)) >= 0) then
+                    if (FoundLayers.IndexOf(IntToStr(ILayer.MechanicalLayer(j))) >= 0) then
                         MechLayer.IsDisplayed[Board] := True
                     else
                         MechLayer.IsDisplayed[Board] := False;
@@ -1278,7 +1284,7 @@ begin
         end
         else
         begin
-            // Hide mode: only hide specified layers, leave others unchanged
+            // Show or hide only the specified layers, leave others unchanged
             
             // For copper layers
             LayerObj := TheLayerStack.FirstLayer;
@@ -1286,20 +1292,20 @@ begin
             begin
                 // Check if this layer is in our found list
                 if (FoundLayers.IndexOf(IntToStr(LayerObj.V6_LayerID)) >= 0) then
-                    LayerObj.IsDisplayed[Board] := False;
+                    LayerObj.IsDisplayed[Board] := Visible;
                 
                 LayerObj := TheLayerStack.NextLayer(LayerObj);
             end;
             
             // For mechanical layers
-            for j := 1 to 32 do
+            for j := 1 to MAX_MECH_LAYERS do
             begin
                 MechLayer := TheLayerStack.LayerObject_V7[ILayer.MechanicalLayer(j)];
                 
-                if MechLayer.MechanicalLayerEnabled then
+                if (MechLayer <> nil) and MechLayer.MechanicalLayerEnabled then
                 begin
-                    if (FoundLayers.IndexOf(IntToStr(MechLayer.V6_LayerID)) >= 0) then
-                        MechLayer.IsDisplayed[Board] := False;
+                    if (FoundLayers.IndexOf(IntToStr(ILayer.MechanicalLayer(j))) >= 0) then
+                        MechLayer.IsDisplayed[Board] := Visible;
                 end;
             end;
             
@@ -1320,7 +1326,7 @@ begin
                 end;
                 
                 if (FoundLayers.IndexOf(IntToStr(LayerID)) >= 0) then
-                    Board.LayerIsDisplayed[LayerID] := False;
+                    Board.LayerIsDisplayed[LayerID] := Visible;
             end;
         end;
         

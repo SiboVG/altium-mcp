@@ -221,10 +221,12 @@ var
     i, ValueStart: Integer;
     SourceList: TStringList;
     Visible: Boolean;
+    Exclusive: Boolean;
 begin
     // Create a stringlist for layer names and extract the visible parameter
     SourceList := TStringList.Create;
     Visible := False;
+    Exclusive := True;
     
     try
         // Parse parameters from the request
@@ -242,12 +244,14 @@ begin
                 ParamValue := Copy(RequestData[i], ValueStart, Length(RequestData[i]) - ValueStart + 1);
                 ParamValue := TrimJSON(ParamValue);
                 Visible := (ParamValue = 'true');
-            end;
+            end
+            else if (Pos('"exclusive"', RequestData[i]) > 0) then
+                Exclusive := (TrimJSON(Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i]))) = 'true');
         end;
-        
+
         if SourceList.Count > 0 then
         begin
-            Result := SetPCBLayerVisibility(SourceList, Visible);
+            Result := SetPCBLayerVisibility(SourceList, Visible, Exclusive);
         end
         else
         begin
