@@ -8,6 +8,9 @@ var
     FocusFailure : String;
     // When ReportProgress last wrote PROGRESS_FILE
     LastProgress : Double;
+    // The last message passed to LogScriptError during this run. A command
+    // that gives up with an empty result has logged why; Run replies with it.
+    LastScriptError : String;
 
 // Tell the server a long command is still working. The server waits as long
 // as this file keeps changing, instead of stopping the command after a fixed
@@ -36,6 +39,7 @@ procedure LogScriptError(Msg: String);
 var
     L : TStringList;
 begin
+    LastScriptError := Msg;
     L := TStringList.Create;
     try
         if FileExists(SCRIPT_ERROR_LOG) then L.LoadFromFile(SCRIPT_ERROR_LOG);
