@@ -1,5 +1,6 @@
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.utilities.types import Image as MCPImage
+from mcp.types import ToolAnnotations
 import json
 import os
 import time
@@ -192,7 +193,20 @@ def _lift_failed_result(response: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # Initialize FastMCP server
-mcp = FastMCP("AltiumMCP", description="Altium integration through the Model Context Protocol")
+mcp = FastMCP("AltiumMCP", instructions="Altium integration through the Model Context Protocol")
+
+READ_ONLY = ToolAnnotations(readOnlyHint=True)
+
+
+def _tool(read_only: bool = False):
+    """Register a tool.
+
+    read_only marks a tool that only reads from Altium, so clients can tell it
+    from the tools that change a design. Results stay plain text content: by
+    default mcp would infer an output schema from "-> str" and send every
+    result twice, once more as structuredContent.
+    """
+    return mcp.tool(annotations=READ_ONLY if read_only else None, structured_output=False)
 
 class AltiumConfig:
     def __init__(self):
@@ -685,7 +699,7 @@ class AltiumBridge:
 # Create a global bridge instance
 altium_bridge = AltiumBridge()
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_all_component_property_names(ctx: Context) -> str:
     """
     Get all available component property names (JSON keys) from all components
@@ -735,7 +749,7 @@ async def get_all_component_property_names(ctx: Context) -> str:
         logger.error(f"Error processing component data: {e}")
         return json.dumps({"error": f"Failed to process component data: {str(e)}"})
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_component_property_values(ctx: Context, property_name: str) -> str:
     """
     Get values of a specific property for all components
@@ -790,7 +804,7 @@ async def get_component_property_values(ctx: Context, property_name: str) -> str
         logger.error(f"Error processing component data: {e}")
         return json.dumps({"error": f"Failed to process component data: {str(e)}"})
     
-@mcp.tool()
+@_tool(read_only=True)
 async def get_symbol_placement_rules(ctx: Context) -> str:
     """
     Get schematic symbol placement rules from a local configuration file
@@ -849,7 +863,7 @@ async def get_symbol_placement_rules(ctx: Context) -> str:
             "error": f"Failed to read rules file: {str(e)}"
         }, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_library_symbol_reference(ctx: Context) -> str:
     """
     Get the currently open symbol from a schematic library to use as reference for creating a new symbol.
@@ -882,7 +896,7 @@ async def get_library_symbol_reference(ctx: Context) -> str:
     logger.info(f"Retrieved symbol reference data")
     return json.dumps(symbol_data, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def search_library_symbol(ctx: Context, symbol_name: str, library_path: str = "") -> str:
     """
     Search for a symbol by name in a schematic library (.SchLib) and navigate to it.
@@ -930,7 +944,7 @@ async def search_library_symbol(ctx: Context, symbol_name: str, library_path: st
     logger.info(f"Symbol search complete. Found: {result.get('found', False)}")
     return json.dumps(result, indent=2)
 
-@mcp.tool()
+@_tool()
 async def create_schematic_symbol(ctx: Context, symbol_name: str, description: str, pins: list, part_count: int = 1, graphics: list = None) -> str:
     r"""
     Before executing, run get_symbol_placement_rules first.
@@ -1026,7 +1040,7 @@ async def create_schematic_symbol(ctx: Context, symbol_name: str, description: s
     logger.info(f"Symbol {symbol_name} created successfully with {len(pins)} pins")
     return json.dumps(result, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_schematic_data(ctx: Context, cmp_designators: list) -> str:
     """
     Get schematic data for components in Altium
@@ -1094,7 +1108,7 @@ async def get_schematic_data(ctx: Context, cmp_designators: list) -> str:
         logger.error(f"Error processing schematic data: {e}")
         return json.dumps({"error": f"Failed to process schematic data: {str(e)}"})
     
-@mcp.tool()
+@_tool(read_only=True)
 async def get_pcb_layers(ctx: Context) -> str:
     """
     Get detailed information about all layers in the current Altium PCB
@@ -1127,7 +1141,7 @@ async def get_pcb_layers(ctx: Context) -> str:
     logger.info(f"Retrieved PCB layers data")
     return json.dumps(layers_data, indent=2)
 
-@mcp.tool()
+@_tool()
 async def set_pcb_layer_visibility(ctx: Context, layer_names: list, visible: bool, exclusive: bool = True) -> str:
     """
     Set visibility for specified PCB layers
@@ -1169,7 +1183,7 @@ async def set_pcb_layer_visibility(ctx: Context, layer_names: list, visible: boo
     logger.info(f"Layer visibility set successfully")
     return json.dumps(result, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_component_data(ctx: Context, cmp_designators: list) -> str:
     """
     Get all data for components in Altium
@@ -1237,7 +1251,7 @@ async def get_component_data(ctx: Context, cmp_designators: list) -> str:
         logger.error(f"Error processing component data: {e}")
         return json.dumps({"error": f"Failed to process component data: {str(e)}"})
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_selected_components_coordinates(ctx: Context) -> str:
     """
     Get coordinates and positioning information for selected components in Altium layout
@@ -1269,7 +1283,7 @@ async def get_selected_components_coordinates(ctx: Context) -> str:
     logger.info(f"Retrieved positioning data for selected components")
     return json.dumps(components_coords, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_all_designators(ctx: Context) -> str:
     """
     Get all component designators from the current Altium board
@@ -1314,7 +1328,7 @@ async def get_all_designators(ctx: Context) -> str:
         logger.error(f"Error processing component data: {e}")
         return json.dumps({"error": f"Failed to process component data: {str(e)}"})
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_component_pins(ctx: Context, cmp_designators: list) -> str:
     """
     Get pin data for components in Altium
@@ -1445,7 +1459,7 @@ def _sandbox() -> sandbox.Sandbox:
                            template=SANDBOX_PAS, runs_dir=SANDBOX_RUNS)
 
 
-@mcp.tool()
+@_tool()
 async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 120) -> str:
     """
     Run a DelphiScript snippet inside an isolated Altium sandbox and report
@@ -1711,7 +1725,7 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
         "steps": steps, **report}, indent=2)
 
 
-@mcp.tool()
+@_tool()
 async def ensure_altium_script_skill(ctx: Context, install: bool = False) -> str:
     """
     Check whether the "altium-script" skill is installed, and optionally
@@ -1768,7 +1782,7 @@ async def ensure_altium_script_skill(ctx: Context, install: bool = False) -> str
                            "error": str(e)[:300]}, indent=2)
 
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_footprint_primitives(ctx: Context, library_path: str = "", footprint_name: str = "") -> str:
     """
     Read the primitives of footprints in a PCB library (.PcbLib).
@@ -1813,7 +1827,7 @@ async def get_footprint_primitives(ctx: Context, library_path: str = "", footpri
     result = response.get("result", {})
     return json.dumps(result, indent=2) if not isinstance(result, str) else result
 
-@mcp.tool()
+@_tool()
 async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
     """
     Create many PCB footprints in a single Altium script run.
@@ -1856,7 +1870,7 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
     result = response.get("result", {})
     return json.dumps(result, indent=2) if not isinstance(result, str) else result
 
-@mcp.tool()
+@_tool()
 async def build_schematic(ctx: Context, parts: list, wires: list = None,
                           junctions: list = None, net_labels: list = None,
                           power_ports: list = None, notes: list = None) -> str:
@@ -1982,7 +1996,7 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
                               "wires from these, not from predicted offsets.")
     return json.dumps(result, indent=2)
 
-@mcp.tool()
+@_tool()
 async def create_symbols_batch(ctx: Context, spec_file: str) -> str:
     """
     Create many schematic symbols in a single Altium script run.
@@ -2023,7 +2037,7 @@ async def create_symbols_batch(ctx: Context, spec_file: str) -> str:
     result = response.get("result", {})
     return json.dumps(result, indent=2) if not isinstance(result, str) else result
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_symbol_primitives(ctx: Context, library_path: str = "", symbol_name: str = "") -> str:
     """
     Read the graphic primitives of symbols in a schematic library (.SchLib).
@@ -2065,7 +2079,7 @@ async def get_symbol_primitives(ctx: Context, library_path: str = "", symbol_nam
     result = response.get("result", {})
     return json.dumps(result, indent=2) if not isinstance(result, str) else result
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_all_nets(ctx: Context) -> str:
     """
     Return every unique net name in the active PCB document.
@@ -2087,7 +2101,7 @@ async def get_all_nets(ctx: Context) -> str:
     # Result is already a JSON‑serialisable Python list
     return json.dumps(response.get("result", []), indent=2)
 
-@mcp.tool()
+@_tool()
 async def create_net_class(ctx: Context, class_name: str, net_names: list) -> str:
     """
     Create a new net class and add specified nets to it
@@ -2122,7 +2136,7 @@ async def create_net_class(ctx: Context, class_name: str, net_names: list) -> st
     logger.info(f"Net class '{class_name}' created/modified successfully")
     return json.dumps(result, indent=2)
     
-@mcp.tool()
+@_tool()
 async def set_component_position(ctx: Context, cmp_designator: str, x: float, y: float, rotation: float = -1) -> str:
     """
     Set a component's absolute position in the PCB layout
@@ -2157,7 +2171,7 @@ async def set_component_position(ctx: Context, cmp_designator: str, x: float, y:
     logger.info(f"Component position set successfully")
     return json.dumps({"success": True, "result": result}, indent=2)
 
-@mcp.tool()
+@_tool()
 async def move_components(ctx: Context, cmp_designators: list, x_offset: float, y_offset: float, rotation: float = 0) -> str:
     """
     Move components by RELATIVE offset from their current position (not absolute positioning)
@@ -2199,7 +2213,7 @@ async def move_components(ctx: Context, cmp_designators: list, x_offset: float, 
     logger.info(f"Components moved successfully")
     return json.dumps({"success": True, "result": result}, indent=2)
 
-@mcp.tool()
+@_tool()
 async def place_components(ctx: Context, placements: list) -> str:
     """
     Place multiple components at absolute positions in a single Altium transaction.
@@ -2307,7 +2321,7 @@ def _mst_length(points: list) -> float:
                     best[v] = d
     return total
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_net_connections(ctx: Context, cmp_designators: list = None, max_pads_per_net: int = 40) -> str:
     """
     Get net connectivity and airline (unrouted connection) lengths for the
@@ -2391,7 +2405,7 @@ def _rotate_offset(dx: float, dy: float, degrees: float) -> tuple:
     return (dx * math.cos(rad) - dy * math.sin(rad),
             dx * math.sin(rad) + dy * math.cos(rad))
 
-@mcp.tool()
+@_tool(read_only=True)
 async def check_orientation(ctx: Context, cmp_designators: list = None, min_improvement_mils: float = 25) -> str:
     """
     Advisory check: find 2-pad passives whose rotation could be improved.
@@ -2532,7 +2546,7 @@ async def check_orientation(ctx: Context, cmp_designators: list = None, min_impr
         "suggestions": suggestions,
     }, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def check_placement(ctx: Context, cmp_designators: list = None, clearance_mils: float = 6) -> str:
     """
     Verify component placement: find overlaps and clearance violations.
@@ -2606,7 +2620,7 @@ def _grab_window_image(hwnd, width: int, height: int) -> Image.Image:
         win32gui.ReleaseDC(hwnd, hwnd_dc)
 
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = None):
     """
     Take a screenshot of the Altium window, returned as viewable image content.
@@ -2876,7 +2890,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
         logger.error(f"Error in screenshot function: {str(e)}")
         return json.dumps({"success": False, "error": f"Failed to take screenshot: {str(e)}"})
     
-@mcp.tool()
+@_tool()
 async def layout_duplicator(ctx: Context) -> str:
     """
     First step of layout duplication. Selects source components and returns data to match with destination components.
@@ -2918,7 +2932,7 @@ async def layout_duplicator(ctx: Context) -> str:
     logger.info(f"Retrieved layout duplicator component data")
     return json.dumps(components_data, indent=2)
 
-@mcp.tool()
+@_tool()
 async def layout_duplicator_apply(ctx: Context, source_designators: list, destination_designators: list) -> str:
     """
     Second step of layout duplication. Applies the layout of source components to destination components.
@@ -2953,7 +2967,7 @@ async def layout_duplicator_apply(ctx: Context, source_designators: list, destin
     logger.info(f"Layout duplication applied successfully")
     return json.dumps(result, indent=2)
     
-@mcp.tool()
+@_tool(read_only=True)
 async def get_pcb_rules(ctx: Context) -> str:
     """
     Get all design rules from the current Altium PCB
@@ -2985,7 +2999,7 @@ async def get_pcb_rules(ctx: Context) -> str:
     logger.info(f"Retrieved PCB rules data")
     return json.dumps(rules_data, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_pcb_layer_stackup(ctx: Context) -> str:
     """
     Get the detailed layer stackup information from the current Altium PCB including
@@ -3018,7 +3032,7 @@ async def get_pcb_layer_stackup(ctx: Context) -> str:
     logger.info(f"Retrieved PCB layer stackup data")
     return json.dumps(stackup_data, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_output_job_containers(ctx: Context, outjob_path: str = "") -> str:
     """
     Get all available output job containers from a specified OutJob file
@@ -3055,7 +3069,7 @@ async def get_output_job_containers(ctx: Context, outjob_path: str = "") -> str:
     logger.info(f"Retrieved output job containers data")
     return containers_data  # Already in JSON format
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_outjob_settings(ctx: Context, outjob_path: str) -> str:
     """
     Read an .OutJob file from disk and return its outputs, containers and settings.
@@ -3100,7 +3114,7 @@ async def _simple_command(command: str, params: dict, what: str) -> str:
     return result if isinstance(result, str) else json.dumps(result, indent=2, ensure_ascii=False)
 
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_project_info(ctx: Context) -> str:
     """
     Get the focused Altium project: parameters, documents and variants.
@@ -3119,7 +3133,7 @@ async def get_project_info(ctx: Context) -> str:
     return await _simple_command("get_project_info", {}, "project info")
 
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_project_components(ctx: Context, include_parameters: bool = False) -> str:
     """
     List every component of the compiled project (schematic side).
@@ -3141,7 +3155,7 @@ async def get_project_components(ctx: Context, include_parameters: bool = False)
                                  {"include_parameters": include_parameters}, "project components")
 
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_erc_violations(ctx: Context, compile: bool = True) -> str:
     """
     Compile the focused project and list its ERC/compiler violations.
@@ -3160,7 +3174,7 @@ async def get_erc_violations(ctx: Context, compile: bool = True) -> str:
     return await _simple_command("get_erc_violations", {"compile": compile}, "ERC violations")
 
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_board_summary(ctx: Context) -> str:
     """
     Summarise the focused PCB for fabrication checks.
@@ -3178,7 +3192,7 @@ async def get_board_summary(ctx: Context) -> str:
     return await _simple_command("get_board_summary", {}, "board summary")
 
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_component_primitives(ctx: Context, designators: list) -> str:
     """
     List the primitives of PCB components with the layer each one is on.
@@ -3199,7 +3213,7 @@ async def get_component_primitives(ctx: Context, designators: list) -> str:
                                  "component primitives")
 
 
-@mcp.tool()
+@_tool()
 async def run_output_jobs(ctx: Context, container_names: list, outjob_path: str = "") -> str:
     """
     Run specified output job containers
@@ -3249,7 +3263,7 @@ async def run_output_jobs(ctx: Context, container_names: list, outjob_path: str 
     # Otherwise, convert to JSON
     return json.dumps(result_data, indent=2)
 
-@mcp.tool()
+@_tool()
 async def create_pcb_footprint(ctx: Context, footprint_name: str, description: str, pads: list, courtyard_x_mm: float = 0, courtyard_y_mm: float = 0) -> str:
     """
     Create a new PCB footprint in the currently active PcbLib document.
@@ -3295,7 +3309,7 @@ async def create_pcb_footprint(ctx: Context, footprint_name: str, description: s
     logger.info(f"Footprint {footprint_name} created successfully")
     return json.dumps(result, indent=2)
 
-@mcp.tool()
+@_tool(read_only=True)
 async def get_server_status(ctx: Context) -> str:
     """Get the current status of the Altium MCP server"""
     altium_bridge.config.discover_altium()
