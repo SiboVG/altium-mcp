@@ -1378,6 +1378,8 @@ SANDBOX_PAS = SANDBOX_DIR / "Sandbox.pas"
 # Run files live in the exchange folder: Altium runs outside Claude Desktop's
 # MSIX package and cannot see the virtualized AppData path (issue #19)
 SANDBOX_RUNS = EXCHANGE_DIR / "runs"
+# Pictures of the dialogs a run answered (their text is often not readable)
+SANDBOX_DIALOGS = EXCHANGE_DIR / "dialogs"
 
 
 def _window_process_name(hwnd) -> str:
@@ -1460,7 +1462,8 @@ def _sandbox() -> sandbox.Sandbox:
 
 
 @_tool()
-async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 120) -> str:
+async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 120,
+                            skip_lint: bool = False) -> str:
     """
     Run a DelphiScript snippet inside an isolated Altium sandbox and report
     what happened, step by step.
@@ -1486,9 +1489,18 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
               X, Y : Integer;
       or reuse the scratch variables S1..S9 (String), I1..I9 and B1..B3
       (Integer), F1..F4 (Double), Obj1..Obj9 (IDispatch), List1..List3
-      (TStringList), IntMan, DbDoc. Assigning an undeclared plain name is
+      (TStringList, created empty by the sandbox - reuse with .Clear, never
+      Free them), IntMan, DbDoc. Assigning an undeclared plain name is
       refused before Altium is called. Do not assign to a for-loop variable
       inside its loop (compile error).
+    - Calls known to crash Altium (SCHM_PrimitiveRegistration,
+      GetState_DescriptionString, reading .Corner, ...) and a PreProcess
+      without PostProcess are refused before Altium is called: a script that
+      dies between PreProcess and PostProcess leaves Altium's undo history
+      broken until Altium is restarted.
+    - Every dialog the tool answers is saved as a picture first, listed in
+      "dialog_snapshots": Altium's own message boxes cannot be read from
+      outside, so open the picture to see the message.
     - Helpers: MM(mm) converts millimetres to internal units;
       OpenSchDoc(path) returns the ISch_Document, opening the file if needed
       (GetSchDocumentByPath alone returns nil for a closed file, and a call on
@@ -1526,6 +1538,8 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
         script (str): DelphiScript statements to execute (body only, optionally
             preceded by a var block).
         timeout_seconds (int): How long to wait for completion (default 120).
+        skip_lint (bool): Run even though the known-crash check refused the
+            script. Only for a false positive.
 
     Returns:
         str: JSON with success, the step log and the script's ResultText; on
@@ -1543,6 +1557,15 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
         return json.dumps({"success": False,
                            "error": "refused before execution: the script would not compile",
                            "problems": problems, "executor_wedged": False}, indent=2)
+    if not skip_lint:
+        problems = sandbox.lint_script(split.body, split.body_offset)
+        if problems:
+            return json.dumps({"success": False,
+                               "error": "refused before execution: the script uses a call known to "
+                                        "crash Altium or leaves a document edit open",
+                               "problems": problems,
+                               "note": "Altium was not touched. Pass skip_lint=True only for a false positive.",
+                               "executor_wedged": False}, indent=2)
 
     problem = await altium_bridge.ensure_paths(need_script=False)
     if problem:
@@ -1581,7 +1604,17 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     # Keyed by window: a dialog that ignores WM_CLOSE (Yes/No boxes do) is
     # found again on every pass and must be reported once
     dismissed = {}
+    snapshots = {}
     error_dialog = None
+
+    def snapshot(d):
+        if d.hwnd not in snapshots:
+            try:
+                snapshots[d.hwnd] = sandbox.snapshot_dialog(d, SANDBOX_DIALOGS)
+            except Exception as e:
+                logger.warning(f"dialog snapshot failed: {e}")
+                snapshots[d.hwnd] = None
+
     while not files.result.exists() and time.time() - start < timeout_seconds:
         await asyncio.sleep(0.5)
         for d in sandbox.altium_dialogs():
@@ -1591,9 +1624,11 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
             if d.is_script_error or (d.cls == "TMessageForm" and d.title == "Error"
                                      and not files.log.exists()):
                 error_dialog = d
+                snapshot(d)
                 sandbox.answer_dialog(d)
                 break
             if time.time() - start > 6:
+                snapshot(d)
                 sandbox.answer_dialog(d)
                 dismissed[d.hwnd] = d
         if error_dialog:
@@ -1601,6 +1636,7 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 
     report["dialogs_dismissed"] = len(dismissed)
     report["dismissed_dialog_titles"] = [d.title for d in dismissed.values()]
+    report["dialog_snapshots"] = [p for p in snapshots.values() if p]
     steps = (sandbox.read_when_ready(files.log, read_altium_text).splitlines()
              if files.log.exists() else [])
 
@@ -1661,8 +1697,9 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
             "error": "run-time error" if started else "compile error",
             "altium_message": error_dialog.text or (
                 "Altium showed an Error box before the script started; its text cannot be read "
-                "from outside Altium. This is usually a syntax error (for example a construct "
-                "DelphiScript does not support, such as 'on E: Exception do')."),
+                "from outside Altium - open the picture in 'dialog_snapshots'. This is usually "
+                "a syntax error (for example a construct DelphiScript does not support, such "
+                "as 'on E: Exception do')."),
             "location": sandbox.map_error_line(built, error_dialog.text),
             "last_step_reached": steps[-1] if steps else None,
             "diagnosis": ("The script started; the statement at 'location' failed while running "
