@@ -2238,7 +2238,11 @@ begin
 
         if (Targets.Count = 0) then
         begin
-            Result := 'ERROR: No components to check (no designators given and no components selected)';
+            if (DesignatorsList.Count > 0) then
+                Result := 'ERROR: None of the given designators is on ' + ExtractFileName(Board.FileName) +
+                          ': ' + DesignatorsList.CommaText
+            else
+                Result := 'ERROR: No components to check (no designators given and no components selected)';
             Exit;
         end;
 
@@ -2355,6 +2359,7 @@ var
     PadProps    : TStringList;
     ResultProps : TStringList;
     NamesArray  : TStringList;
+    MissingArray : TStringList;
     OutputLines : TStringList;
     Designator  : String;
     xorigin, yorigin : Integer;
@@ -2375,6 +2380,7 @@ begin
     PadsArray := TStringList.Create;
     ResultProps := TStringList.Create;
     NamesArray := TStringList.Create;
+    MissingArray := TStringList.Create;
 
     try
         // Build the target component list: explicit designators, or selection
@@ -2384,7 +2390,9 @@ begin
             begin
                 Designator := Trim(DesignatorsList[i]);
                 if (Board.GetPcbComponentByRefDes(Designator) <> nil) then
-                    TargetNames.Add(Designator);
+                    TargetNames.Add(Designator)
+                else
+                    MissingArray.Add('"' + JSONEscapeString(Designator) + '"');
             end;
         end
         else
@@ -2396,7 +2404,11 @@ begin
 
         if (TargetNames.Count = 0) then
         begin
-            Result := 'ERROR: No components found (no designators given and no components selected)';
+            if (DesignatorsList.Count > 0) then
+                Result := 'ERROR: None of the given designators is on ' + ExtractFileName(Board.FileName) +
+                          ': ' + DesignatorsList.CommaText
+            else
+                Result := 'ERROR: No components found (no designators given and no components selected)';
             Exit;
         end;
 
@@ -2460,6 +2472,10 @@ begin
             NamesArray.Add('"' + JSONEscapeString(TargetNames[i]) + '"');
         ResultProps.Add(BuildJSONArray(NamesArray, 'targets'));
         NamesArray.Clear;
+        if (MissingArray.Count > 0) then
+            ResultProps.Add(BuildJSONArray(MissingArray, 'missing_designators'))
+        else
+            ResultProps.Add('"missing_designators": []');
 
         for i := 0 to NetNames.Count - 1 do
             NamesArray.Add('"' + JSONEscapeString(NetNames[i]) + '"');
@@ -2488,6 +2504,7 @@ begin
         PadsArray.Free;
         ResultProps.Free;
         NamesArray.Free;
+        MissingArray.Free;
     end;
 end;
 
