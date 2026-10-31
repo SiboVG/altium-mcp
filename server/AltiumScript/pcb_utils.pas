@@ -618,6 +618,7 @@ var
     i           : Integer;
     ResultProps : TStringList;
     AddedCount  : Integer;
+    WasMember   : Boolean;
     OutputLines : TStringList;
 begin
     // Initialize result
@@ -674,8 +675,11 @@ begin
         PCBServer.PreProcess;
         for i := 0 to NetNames.Count - 1 do
         begin
-            // Add each net to the class
-            if NetClass.AddMemberByName(NetNames[i]) then
+            // AddMemberByName returns nothing: count the nets that were not
+            // members before and are now
+            WasMember := NetClass.IsMember(NetNames[i]);
+            NetClass.AddMemberByName(NetNames[i]);
+            if (not WasMember) and NetClass.IsMember(NetNames[i]) then
                 AddedCount := AddedCount + 1;
         end;
         PCBServer.PostProcess;
@@ -1813,9 +1817,11 @@ begin
         Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
         
         AddJSONProperty(ResultProps, 'designator', Designator);
-        AddJSONProperty(ResultProps, 'new_x', FloatToStr(NewX), False);
-        AddJSONProperty(ResultProps, 'new_y', FloatToStr(NewY), False);
-        AddJSONProperty(ResultProps, 'rotation', FloatToStr(Component.Rotation), False);
+        // AddJSONNumber: FloatToStr writes the locale's decimal separator,
+        // and a decimal comma made the reply invalid JSON (#31)
+        AddJSONNumber(ResultProps, 'new_x', NewX);
+        AddJSONNumber(ResultProps, 'new_y', NewY);
+        AddJSONNumber(ResultProps, 'rotation', Component.Rotation);
         
         Result := '{"success": true, "result": ' + BuildJSONObject(ResultProps) + '}';
     finally
