@@ -36,6 +36,10 @@ var
     // Loop guard state, see SandboxTick
     SbxGuardUntil   : Double;
     SbxGuardTripped : Boolean;
+    // Undo groups the script has opened and not yet closed, see SbxPreProcess
+    SbxUndoDocs  : TList;
+    SbxUndoNames : TStringList;
+    SbxUndoPath  : String;
 
 procedure SandboxLog(Msg: String);
 begin
@@ -57,6 +61,86 @@ begin
                    ' was still running after %GUARD_SECONDS% s; every loop was cut short from here on');
     end;
     Result := not SbxGuardTripped;
+end;
+
+// The tool rewrites the script's SchServer.ProcessControl.PreProcess/PostProcess
+// and PCBServer.PreProcess/PostProcess calls into these. PreProcess opens an
+// undo group on a document and PostProcess closes it; a group left open (the
+// script failed between the two) makes every later edit in that document,
+// including the user's, impossible to undo until Altium restarts. So the open
+// groups are kept here, closed by SbxCloseUndo when the script ends, and also
+// written to a file, so the tool can close them even when the script dies in
+// Altium's debugger and never reaches its end.
+// The list is a fallback for a script that dies in the debugger; failing to
+// write it must never fail the script. A server started before this template
+// existed leaves the path token unfilled.
+procedure SbxSaveUndo;
+begin
+    if (SbxUndoPath = '') or (Copy(SbxUndoPath, 1, 1) = '%') then Exit;
+    try
+        SbxUndoNames.SaveToFile(SbxUndoPath);
+    except
+    end;
+end;
+
+procedure SbxPreProcess(Doc : IDispatch; Param : String);
+begin
+    SchServer.ProcessControl.PreProcess(Doc, Param);
+    SbxUndoDocs.Add(Doc);
+    SbxUndoNames.Add('SCH|' + Doc.DocumentName);
+    SbxSaveUndo;
+end;
+
+procedure SbxPostProcess(Doc : IDispatch; Param : String);
+begin
+    SchServer.ProcessControl.PostProcess(Doc, Param);
+    if SbxUndoNames.Count > 0 then
+    begin
+        SbxUndoDocs.Delete(SbxUndoDocs.Count - 1);
+        SbxUndoNames.Delete(SbxUndoNames.Count - 1);
+        SbxSaveUndo;
+    end;
+end;
+
+procedure SbxPcbPreProcess;
+begin
+    PCBServer.PreProcess;
+    SbxUndoDocs.Add(nil);
+    SbxUndoNames.Add('PCB|');
+    SbxSaveUndo;
+end;
+
+procedure SbxPcbPostProcess;
+begin
+    PCBServer.PostProcess;
+    if SbxUndoNames.Count > 0 then
+    begin
+        SbxUndoDocs.Delete(SbxUndoDocs.Count - 1);
+        SbxUndoNames.Delete(SbxUndoNames.Count - 1);
+        SbxSaveUndo;
+    end;
+end;
+
+// Close, newest first, every undo group the script left open
+procedure SbxCloseUndo;
+var
+    I : Integer;
+begin
+    for I := SbxUndoNames.Count - 1 downto 0 do
+    begin
+        try
+            if Copy(SbxUndoNames[I], 1, 4) = 'PCB|' then
+                PCBServer.PostProcess
+            else
+                SchServer.ProcessControl.PostProcess(SbxUndoDocs[I], '');
+            SandboxLog('UNDO GROUP LEFT OPEN: closed it on ' + SbxUndoNames[I]);
+        except
+            SandboxLog('UNDO GROUP LEFT OPEN: could not close it on ' + SbxUndoNames[I]);
+        end;
+    end;
+    SbxUndoDocs.Clear;
+    SbxUndoNames.Clear;
+    SbxSaveUndo;
 end;
 
 // Millimetres to Altium internal coordinate units (10000 per mil).
@@ -112,6 +196,9 @@ begin
     LogLines := TStringList.Create;
     SbxGuardUntil := Now + %GUARD_SECONDS% / 86400;
     SbxGuardTripped := False;
+    SbxUndoDocs := TList.Create;
+    SbxUndoNames := TStringList.Create;
+    SbxUndoPath := '%UNDO_PATH%';
     ResultText := '{"sandbox": "no result set"}';
     SandboxLog('sandbox start');
 
@@ -127,6 +214,7 @@ begin
         ResultText := '{"error": "script raised an exception - see steps"}';
     end;
 
+    SbxCloseUndo;
     SandboxLog('sandbox end');
 
     OutLines := TStringList.Create;
