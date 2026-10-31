@@ -71,9 +71,16 @@ end;
 // groups are kept here, closed by SbxCloseUndo when the script ends, and also
 // written to a file, so the tool can close them even when the script dies in
 // Altium's debugger and never reaches its end.
+// The list is a fallback for a script that dies in the debugger; failing to
+// write it must never fail the script. A server started before this template
+// existed leaves the path token unfilled.
 procedure SbxSaveUndo;
 begin
-    SbxUndoNames.SaveToFile(SbxUndoPath);
+    if (SbxUndoPath = '') or (Copy(SbxUndoPath, 1, 1) = '%') then Exit;
+    try
+        SbxUndoNames.SaveToFile(SbxUndoPath);
+    except
+    end;
 end;
 
 procedure SbxPreProcess(Doc : IDispatch; Param : String);
