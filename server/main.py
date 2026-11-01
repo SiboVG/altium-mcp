@@ -142,7 +142,7 @@ MUTATING_COMMANDS = {
     "create_net_class", "create_schematic_symbol", "set_component_position",
     "move_components", "place_components", "create_symbols_batch", "build_circuit",
     "create_footprints_batch", "layout_duplicator", "layout_duplicator_apply",
-    "run_output_jobs", "create_pcb_footprint", "edit_schematic",
+    "run_output_jobs", "create_pcb_footprint",
 }
 
 # Present while a script the MCP launched is stuck (paused in Altium's
@@ -2112,6 +2112,9 @@ async def edit_schematic(ctx: Context, sheet_path: str, operations: list, unit: 
     if result.get("errors"):
         result["success"] = False
     return json.dumps(result, indent=2)
+
+# Changes the design: a timeout leaves its outcome unknown, so no blind retry
+MUTATING_COMMANDS.add("edit_schematic")
 
 @_tool(read_only=True)
 async def check_schematic(ctx: Context, path: str, max_issues_per_sheet: int = 150) -> str:
