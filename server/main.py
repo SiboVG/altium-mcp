@@ -142,7 +142,7 @@ MUTATING_COMMANDS = {
     "create_net_class", "create_schematic_symbol", "set_component_position",
     "move_components", "place_components", "create_symbols_batch", "build_circuit",
     "create_footprints_batch", "layout_duplicator", "layout_duplicator_apply",
-    "run_output_jobs", "create_pcb_footprint", "create_pcb_rule",
+    "run_output_jobs", "create_pcb_footprint",
 }
 
 # Present while a script the MCP launched is stuck (paused in Altium's
@@ -3348,6 +3348,9 @@ async def create_pcb_rule(ctx: Context, rule_type: str, name: str, values: dict,
                              f"{others} other {rule_type} rule(s) on the board. Narrow its scope or "
                              f"move it down in Altium's rules editor if that is not intended.")
     return json.dumps(result, indent=2)
+
+# Changes the design: a timeout leaves its outcome unknown, so no blind retry
+MUTATING_COMMANDS.add("create_pcb_rule")
 
 @_tool(read_only=True)
 async def get_output_job_containers(ctx: Context, outjob_path: str = "") -> str:
