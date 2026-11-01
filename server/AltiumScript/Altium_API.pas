@@ -677,6 +677,12 @@ begin
     end;
 end;
 
+// Function to execute get output job containers
+function ExecuteGetOutputJobContainers(RequestData: TStringList): String;
+begin
+    Result := GetOutputJobContainers(RequestOutJobPath(RequestData), ROOT_DIR);
+end;
+
 // Function to execute run DRC
 function ExecuteRunDRC(RequestData: TStringList): String;
 var
@@ -687,12 +693,6 @@ begin
         if Pos('"max_violations"', RequestData[i]) > 0 then
             MaxViolations := StrToInt(JSONLineValue(RequestData[i]));
     Result := RunDRC(MaxViolations);
-end;
-
-// Function to execute get output job containers
-function ExecuteGetOutputJobContainers(RequestData: TStringList): String;
-begin
-    Result := GetOutputJobContainers(RequestOutJobPath(RequestData), ROOT_DIR);
 end;
 
 // Function to execute run output jobs

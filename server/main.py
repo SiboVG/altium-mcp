@@ -26,7 +26,6 @@ import uuid
 from altium_files import read_altium_text, write_altium_text
 from exchange_lock import ExchangeLock
 from altium_install import find_altium_exe
-import drc
 import routing
 import sandbox
 import win_processes
@@ -3273,6 +3272,8 @@ async def run_drc(ctx: Context, board_path: str = "", max_violations: int = 200)
              description, layer, x_mils/y_mils relative to the board origin,
              and the primitives involved), and the report's per-rule counts.
     """
+    import drc
+
     logger.info(f"Running DRC on {board_path or 'the focused board'}")
     started = time.time()
     outcome = drc.DialogOutcome()
