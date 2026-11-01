@@ -142,7 +142,7 @@ MUTATING_COMMANDS = {
     "create_net_class", "create_schematic_symbol", "set_component_position",
     "move_components", "place_components", "create_symbols_batch", "build_circuit",
     "create_footprints_batch", "layout_duplicator", "layout_duplicator_apply",
-    "run_output_jobs", "create_pcb_footprint", "create_polygon_pour", "create_cutout",
+    "run_output_jobs", "create_pcb_footprint",
 }
 
 # Present while a script the MCP launched is stuck (paused in Altium's
@@ -2860,6 +2860,9 @@ async def place_cutout(ctx: Context, outline: list, kind: str = "polygon", layer
                            "error": f"Failed to add the cutout: {response.get('error', 'unknown error')}"})
     result = response.get("result", {})
     return json.dumps(result, indent=2) if not isinstance(result, str) else result
+
+# Change the design: a timeout leaves their outcome unknown, so no blind retry
+MUTATING_COMMANDS.update({"create_polygon_pour", "create_cutout"})
 
 @_tool()
 async def route_track(ctx: Context, net_name: str, layer: str, width_mils: float, points: list,
