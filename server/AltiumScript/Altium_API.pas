@@ -661,6 +661,34 @@ begin
     end;
 end;
 
+// The board a PCB command names in "board_path", or '' to use the focused one
+function RequestBoardPath(RequestData: TStringList): String;
+var
+    i: Integer;
+begin
+    Result := '';
+    for i := 0 to RequestData.Count - 1 do
+    begin
+        if (Pos('"board_path"', RequestData[i]) > 0) then
+        begin
+            Result := Trim(JSONLineValue(RequestData[i]));
+            break;
+        end;
+    end;
+end;
+
+// Function to execute run DRC
+function ExecuteRunDRC(RequestData: TStringList): String;
+var
+    i, MaxViolations : Integer;
+begin
+    MaxViolations := 200;
+    for i := 0 to RequestData.Count - 1 do
+        if Pos('"max_violations"', RequestData[i]) > 0 then
+            MaxViolations := StrToInt(JSONLineValue(RequestData[i]));
+    Result := RunDRC(MaxViolations);
+end;
+
 // Function to execute get output job containers
 function ExecuteGetOutputJobContainers(RequestData: TStringList): String;
 begin
@@ -936,7 +964,18 @@ begin
     // 'ERROR: ' prefix into success=false with this message.
     // An OutJob command that names its file needs no OutJob open in a
     // project: the command resolves and opens the named file itself.
-    if not (((CommandName = 'get_output_job_containers') or
+    // A command that names its board acts on that board, never on whichever
+    // one happens to have focus
+    if RequestBoardPath(RequestData) <> '' then
+    begin
+        FocusFailure := FocusBoardByPath(RequestBoardPath(RequestData));
+        if FocusFailure <> '' then
+        begin
+            Result := 'ERROR: ' + FocusFailure;
+            Exit;
+        end;
+    end
+    else if not (((CommandName = 'get_output_job_containers') or
              (CommandName = 'run_output_jobs')) and
             (RequestOutJobPath(RequestData) <> '')) then
     begin
@@ -998,6 +1037,8 @@ begin
             Result := GetLayoutDuplicatorComponents(True);            
         'layout_duplicator_apply':
             Result := ExecuteLayoutDuplicatorApply(RequestData);            
+        'run_drc':
+            Result := ExecuteRunDRC(RequestData);
         'get_pcb_rules':
             Result := GetPCBRules(ROOT_DIR);
         'get_output_job_containers':

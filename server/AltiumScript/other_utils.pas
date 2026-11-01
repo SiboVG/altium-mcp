@@ -347,6 +347,38 @@ begin
     LogScriptError('EnsureDocumentFocused(' + CommandName + '): ' + FocusFailure);
 end;
 
+// Bring the board at Path to the front, opening it when it is not open, for a
+// command whose request names its board (board_path) instead of acting on
+// whichever board has focus. That is what keeps an edit meant for one board,
+// say a copy being tested, off another. '' when it worked, else why not.
+function FocusBoardByPath(Path: String): String;
+var
+    Doc   : IServerDocument;
+    Board : IPCB_Board;
+begin
+    Result := '';
+    Doc := Client.GetDocumentByPath(Path);
+    if Doc = nil then
+    begin
+        if not FileExists(Path) then
+        begin
+            Result := 'Board not found: ' + Path;
+            Exit;
+        end;
+        Doc := Client.OpenDocument('PCB', Path);
+    end;
+    if Doc = nil then
+    begin
+        Result := 'Could not open the board ' + Path;
+        Exit;
+    end;
+    Client.ShowDocument(Doc);
+    Board := FocusedBoard(0);
+    if (Board = nil) or
+       (UpperCase(ExpandFileName(Board.FileName)) <> UpperCase(ExpandFileName(Path))) then
+        Result := 'Could not bring the board ' + Path + ' to the front';
+end;
+
 // Modify the EnsureDocumentFocused function to handle all document types
 // and return more detailed information.
 // ViewTypeHint is only consulted by commands that can target more than one
@@ -391,6 +423,7 @@ begin
        (CommandName = 'get_component_pins')                  or
        (CommandName = 'get_pcb_layers')                      or
        (CommandName = 'get_pcb_rules')                       or
+       (CommandName = 'run_drc')                             or
        (CommandName = 'get_selected_components_coordinates') or
        (CommandName = 'layout_duplicator')                   or
        (CommandName = 'layout_duplicator_apply')             or
