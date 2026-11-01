@@ -30,7 +30,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from schdoc_reader import coord, read_schdoc
+from schdoc_reader import coord, read_schdoc_streams
 
 # Altium draws schematic text at 0.903 x the font size in 10-mil units
 EM_PER_POINT = 9.03
@@ -176,7 +176,7 @@ BODY_RECORDS = {"5", "6", "7", "8", "10", "11", "12", "13", "14"}
 
 
 class Sheet:
-    def __init__(self, records):
+    def __init__(self, records, additional=()):
         self.records = records
         hdr = next((r for r in records if r and r.get("RECORD") == "31"), {})
         self.fonts = {}
@@ -200,6 +200,7 @@ class Sheet:
         self.glyphs = []       # {owner, box}: power-port and connector symbols
         self.sheet_symbols = {}  # record index -> {box, entries, name, file}
         self._parse()
+        self._parse_harness(additional)
 
     def text_size(self, text, font_id):
         name, size, bold, italic = self.fonts.get(int(font_id or 1), ("Times New Roman", 10, False, False))
@@ -309,7 +310,7 @@ class Sheet:
             elif kind == "15":
                 box = Box(coord(r, "LOCATION.X"), coord(r, "LOCATION.Y") - coord(r, "YSIZE"),
                           coord(r, "LOCATION.X") + coord(r, "XSIZE"), coord(r, "LOCATION.Y"))
-                self.glyphs.append({"owner": "sheet symbol", "box": box, "sheet_symbol": True})
+                self.glyphs.append({"owner": "sheet symbol", "box": box, "wire_ends": True})
                 self.sheet_symbols[i] = {"box": box, "entries": [], "name": None, "file": None}
             elif kind == "16" and owner in self.sheet_symbols:
                 # DistanceFromTop is in 100 mil units, with a millionths part
@@ -340,6 +341,19 @@ class Sheet:
                 xs = [p["base"][0] for p in c["pins"]]
                 ys = [p["base"][1] for p in c["pins"]]
                 c["body"] = Box(min(xs), min(ys), max(xs), max(ys))
+
+    def _parse_harness(self, records):
+        """Harness objects, from the sheet's "Additional" stream. A wire ends on
+        a harness connector's edge, at an entry, as on a sheet symbol's; a
+        signal harness joins wires as a bus does."""
+        for r in records:
+            kind = r.get("RECORD") if r else None
+            if kind == "215":
+                x, y = coord(r, "LOCATION.X"), coord(r, "LOCATION.Y")
+                box = Box(x, y - coord(r, "YSIZE"), x + coord(r, "XSIZE"), y)
+                self.glyphs.append({"owner": "harness connector", "box": box, "wire_ends": True})
+            elif kind == "218":
+                self.buses.append(_points(r))
 
     def _net_label(self, r):
         text = r.get("TEXT", "")
@@ -493,7 +507,7 @@ class Checker:
                     continue
                 if any(_on_segment(end, (b[k], b[k + 1])) for b in self.s.buses for k in range(len(b) - 1)):
                     continue
-                if any(g.get("sheet_symbol") and g["box"].contains(*end) for g in self.s.glyphs):
+                if any(g.get("wire_ends") and g["box"].contains(*end) for g in self.s.glyphs):
                     continue
                 length = math.hypot(nxt[0] - end[0], nxt[1] - end[1]) or 1.0
                 self.free_ends.append((end, wi, ((nxt[0] - end[0]) / length, (nxt[1] - end[1]) / length)))
@@ -835,7 +849,7 @@ class Checker:
 
 
 def check_sheet(path) -> dict:
-    sheet = Sheet(read_schdoc(path))
+    sheet = Sheet(*read_schdoc_streams(path))
     checker = Checker(sheet)
     issues = checker.run()
     counts = defaultdict(int)

@@ -230,6 +230,29 @@ class SheetSymbolTest(unittest.TestCase):
         self.assertEqual(issues["sheet_symbol_text"]["suggest"]["file_name"], {"x": 1000, "y": 2000, "justification": 0})
 
 
+class HarnessTest(unittest.TestCase):
+    def test_wires_on_a_harness_connector_and_a_signal_harness_are_not_free(self):
+        recs = [
+            {"HEADER": "x"},
+            {"RECORD": 31, "FONTIDCOUNT": 1, "SIZE1": 10, "FONTNAME1": "Times New Roman", "SNAPGRIDSIZE": 10},
+            # from an entry on the connector's right edge (x=3000) to a label at the free end
+            wire((3000, 2000), (3600, 2000)), label("SIG", 3600, 2000, just=2),
+            # from a signal harness to a label at the free end
+            wire((1500, 1500), (2000, 1500)), label("SIG2", 1500, 1500),
+        ]
+        # The connector, its entry and the harness are stored in the
+        # "Additional" stream, numbered on their own
+        additional = parse_records(records_stream([
+            {"HEADER": "x"},
+            {"RECORD": 215, **at(2300, 2300), "XSIZE": 70, "YSIZE": 60},
+            {"RECORD": 216, "OWNERINDEXADDITIONALLIST": "T", "SIDE": 1, "DISTANCEFROMTOP": 3, "NAME": "SIG"},
+            {"RECORD": 218, "LOCATIONCOUNT": 2, "X1": 200, "Y1": 160, "X2": 200, "Y2": 140},
+        ]))
+        sheet = parse_records(records_stream(recs))
+        self.assertIn("dangling_wire", {i["type"] for i in sc.Checker(sc.Sheet(sheet)).run()})
+        self.assertEqual(sc.Checker(sc.Sheet(sheet, additional)).run(), [])
+
+
 class TextBoxTest(unittest.TestCase):
     def test_justification_and_rotation(self):
         b = sc.text_box(0, 0, 100, 10, 0, 0)

@@ -116,8 +116,20 @@ def parse_records(stream: bytes) -> list:
 def read_schdoc(path) -> list:
     """All records of a .SchDoc, the sheet header first (index -1 in OWNERINDEX
     terms is the header, so record i here is OWNERINDEX i - 1)."""
+    return read_schdoc_streams(path)[0]
+
+
+def read_schdoc_streams(path) -> tuple:
+    """The records of the "FileHeader" stream, and of the "Additional" stream
+    that holds the harness objects: connectors (215), their entries (216) and
+    types (217), and signal harnesses (218). Additional is empty when the
+    file has no such stream."""
     cf = CompoundFile(Path(path).read_bytes())
-    return parse_records(cf.stream("FileHeader"))
+    try:
+        additional = parse_records(cf.stream("Additional"))
+    except KeyError:
+        additional = []
+    return parse_records(cf.stream("FileHeader")), additional
 
 
 def coord(rec: dict, key: str) -> float:
