@@ -1466,12 +1466,15 @@ end;
 { the drafting rules the spec is expected to already satisfy - this code places }
 { what it is told and reports what it did; it does not lay out.                 }
 {                                                                              }
-{ Spec records (pipe-delimited, one per line, coordinates in mils):             }
+{ Spec records (pipe-delimited, one per line). Coordinates are Altium coords  }
+{ (10000 per mil), not mils: whole mils miss a metric grid, and a wire a few  }
+{ microns out of level turns diagonal when the part is dragged.               }
 {   PART|desig|symlib|symbol|designitemid|x|y|orient|mirror                     }
 {   COMMENT|t   DESCRIPTION|t   FOOTPRINT|n   PARAM|name|value                  }
 {   WIRE|x1|y1|x2|y2[|...]      JUNCTION|x|y                                    }
 {   NETLABEL|x|y|orient|text    POWER|x|y|orient|style|text|shownetname         }
 {   NOTE|x|y|text                                                               }
+{ pin_map.txt gives each pin's connection point in coords too.                }
 {                                                                              }
 { Uses LOCAL variables throughout, deliberately. The dev sandbox shares scratch }
 { variables between blocks and that silently corrupted results three separate   }
@@ -1482,13 +1485,14 @@ end;
 // Absolute electrical connection point of a pin. Pin.Location is the end
 // attached to the BODY; the hot end is PinLength further along the pin's
 // orientation. Verified 119:0 against a hand-wired production sheet.
+// In coords, not mils: rounding to mils misplaces pins of metric symbols.
 procedure GetPinHotEnd(Pin: ISch_Pin; var HotX: Integer; var HotY: Integer);
 var
     PinLen : Integer;
 begin
-    HotX := CoordToMils(Pin.Location.X);
-    HotY := CoordToMils(Pin.Location.Y);
-    PinLen := CoordToMils(Pin.PinLength);
+    HotX := Pin.Location.X;
+    HotY := Pin.Location.Y;
+    PinLen := Pin.PinLength;
     if      (Pin.Orientation = 0) then HotX := HotX + PinLen
     else if (Pin.Orientation = 1) then HotY := HotY + PinLen
     else if (Pin.Orientation = 2) then HotX := HotX - PinLen
@@ -1803,8 +1807,8 @@ begin
 
                 // MoveByXY, not Location, so child text travels with the part
                 Replica.MoveByXY(
-                    MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 5)) - CoordToMils(Replica.Location.X)),
-                    MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 6)) - CoordToMils(Replica.Location.Y)));
+                    StrToInt(GetFieldFromPipeString(Rec, 5)) - Replica.Location.X,
+                    StrToInt(GetFieldFromPipeString(Rec, 6)) - Replica.Location.Y);
 
                 Comp := Replica;
                 PartCount := PartCount + 1;
@@ -1872,8 +1876,8 @@ begin
         else if (Kind = 'WIRE') then
         begin
             Obj := SchServer.SchObjectFactory(eWire, eCreate_GlobalCopy);
-            Obj.Location := Point(MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 1))),
-                                  MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 2))));
+            Obj.Location := Point(StrToInt(GetFieldFromPipeString(Rec, 1)),
+                                  StrToInt(GetFieldFromPipeString(Rec, 2)));
             fld := 1;
             vtx := 0;
             while (GetFieldFromPipeString(Rec, fld) <> '') do
@@ -1881,8 +1885,8 @@ begin
                 vtx := vtx + 1;
                 Obj.InsertVertex := vtx;
                 Obj.SetState_Vertex(vtx,
-                    Point(MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, fld))),
-                          MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, fld + 1)))));
+                    Point(StrToInt(GetFieldFromPipeString(Rec, fld)),
+                          StrToInt(GetFieldFromPipeString(Rec, fld + 1))));
                 fld := fld + 2;
             end;
             TargetDoc.RegisterSchObjectInContainer(Obj);
@@ -1894,8 +1898,8 @@ begin
         else if (Kind = 'JUNCTION') then
         begin
             Obj := SchServer.SchObjectFactory(eJunction, eCreate_GlobalCopy);
-            Obj.Location := Point(MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 1))),
-                                  MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 2))));
+            Obj.Location := Point(StrToInt(GetFieldFromPipeString(Rec, 1)),
+                                  StrToInt(GetFieldFromPipeString(Rec, 2)));
             TargetDoc.RegisterSchObjectInContainer(Obj);
             SchServer.RobotManager.SendMessage(TargetDoc.I_ObjectAddress, c_BroadCast,
                 SCHM_PrimitiveRegistration, Obj.I_ObjectAddress);
@@ -1905,8 +1909,8 @@ begin
         else if (Kind = 'NETLABEL') then
         begin
             Obj := SchServer.SchObjectFactory(eNetLabel, eCreate_GlobalCopy);
-            Obj.Location := Point(MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 1))),
-                                  MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 2))));
+            Obj.Location := Point(StrToInt(GetFieldFromPipeString(Rec, 1)),
+                                  StrToInt(GetFieldFromPipeString(Rec, 2)));
             Obj.Orientation := StrToInt(GetFieldFromPipeString(Rec, 3));
             Obj.Text := GetFieldFromPipeString(Rec, 4);
             TargetDoc.RegisterSchObjectInContainer(Obj);
@@ -1918,8 +1922,8 @@ begin
         else if (Kind = 'POWER') then
         begin
             Obj := SchServer.SchObjectFactory(ePowerObject, eCreate_GlobalCopy);
-            Obj.Location := Point(MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 1))),
-                                  MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 2))));
+            Obj.Location := Point(StrToInt(GetFieldFromPipeString(Rec, 1)),
+                                  StrToInt(GetFieldFromPipeString(Rec, 2)));
             Obj.Orientation := StrToInt(GetFieldFromPipeString(Rec, 3));
             Obj.Style := StrToInt(GetFieldFromPipeString(Rec, 4));
             // NOTE: ShowNetName := False does NOT hide the label - Altium draws
@@ -1938,12 +1942,12 @@ begin
             // IOType: 0=unspecified 1=output 2=input 3=bidirectional.
             // Location is the port's connection-side end; wire to it.
             Obj := SchServer.SchObjectFactory(ePort, eCreate_GlobalCopy);
-            Obj.Location := Point(MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 1))),
-                                  MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 2))));
+            Obj.Location := Point(StrToInt(GetFieldFromPipeString(Rec, 1)),
+                                  StrToInt(GetFieldFromPipeString(Rec, 2)));
             Obj.Name := GetFieldFromPipeString(Rec, 3);
             Obj.IOType := StrToInt(GetFieldFromPipeString(Rec, 4));
             Obj.Style := StrToInt(GetFieldFromPipeString(Rec, 5));
-            Obj.Width := MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 6)));
+            Obj.Width := StrToInt(GetFieldFromPipeString(Rec, 6));
             TargetDoc.RegisterSchObjectInContainer(Obj);
             SchServer.RobotManager.SendMessage(TargetDoc.I_ObjectAddress, c_BroadCast,
                 SCHM_PrimitiveRegistration, Obj.I_ObjectAddress);
@@ -1953,8 +1957,8 @@ begin
         else if (Kind = 'NOTE') then
         begin
             Obj := SchServer.SchObjectFactory(eLabel, eCreate_GlobalCopy);
-            Obj.Location := Point(MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 1))),
-                                  MilsToCoord(StrToInt(GetFieldFromPipeString(Rec, 2))));
+            Obj.Location := Point(StrToInt(GetFieldFromPipeString(Rec, 1)),
+                                  StrToInt(GetFieldFromPipeString(Rec, 2)));
             Obj.Text := GetFieldFromPipeString(Rec, 3);
             TargetDoc.RegisterSchObjectInContainer(Obj);
             SchServer.RobotManager.SendMessage(TargetDoc.I_ObjectAddress, c_BroadCast,

@@ -1955,11 +1955,22 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
             sheet rather than guessing: 5 = digital ground, 2 = supply bar.
         notes: [{"x":..,"y":..,"text":".."}] free text.
 
+        All coordinates are mils and keep their fractions, so a metric sheet
+        can be drawn exactly (1 mm = 39.3700787 mil). The pin_map has the
+        same precision: route from its values unrounded, or a wire ends up
+        a few microns out of level and turns diagonal when its part moves.
+
     Returns:
         JSON with the created sheet name, counts, and the pin map - every
         placed pin's true connection point, for routing a follow-up call.
     """
     logger.info(f"Building schematic: {len(parts)} parts")
+
+    # The spec carries Altium coords (10000 per mil). Whole mils missed a
+    # metric grid by up to half a mil, and a wire that far out of level turns
+    # diagonal when its part is dragged.
+    def c(v):
+        return str(int(round(float(v) * 10000)))
 
     lines = []
     for p in parts:
@@ -1969,7 +1980,7 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
                                    "error": f"part missing required key '{key}': {p}"})
         lines.append("PART|{}|{}|{}|{}|{}|{}|{}|{}".format(
             p["designator"], p["symbol_library"], p["symbol"],
-            p.get("design_item_id", ""), int(p["x"]), int(p["y"]),
+            p.get("design_item_id", ""), c(p["x"]), c(p["y"]),
             int(p.get("orientation", 0)), 1 if p.get("mirror") else 0))
         if p.get("comment"):
             lines.append(f"COMMENT|{p['comment']}")
@@ -1994,19 +2005,19 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
         if len(route) < 4 or len(route) % 2:
             return json.dumps({"success": False,
                                "error": f"wire needs an even count of >=4 coords: {route}"})
-        lines.append("WIRE|" + "|".join(str(int(v)) for v in route))
+        lines.append("WIRE|" + "|".join(c(v) for v in route))
     for j in (junctions or []):
-        lines.append(f"JUNCTION|{int(j['x'])}|{int(j['y'])}")
+        lines.append(f"JUNCTION|{c(j['x'])}|{c(j['y'])}")
     for n in (net_labels or []):
         lines.append("NETLABEL|{}|{}|{}|{}".format(
-            int(n["x"]), int(n["y"]), int(n.get("orientation", 0)), n["text"]))
+            c(n["x"]), c(n["y"]), int(n.get("orientation", 0)), n["text"]))
     for pw in (power_ports or []):
         lines.append("POWER|{}|{}|{}|{}|{}|{}".format(
-            int(pw["x"]), int(pw["y"]), int(pw.get("orientation", 3)),
+            c(pw["x"]), c(pw["y"]), int(pw.get("orientation", 3)),
             int(pw.get("style", 5)), pw["text"],
             1 if pw.get("show_net_name") else 0))
     for nt in (notes or []):
-        lines.append(f"NOTE|{int(nt['x'])}|{int(nt['y'])}|{nt['text']}")
+        lines.append(f"NOTE|{c(nt['x'])}|{c(nt['y'])}|{nt['text']}")
 
     spec_path = Path("C:/Users/Public/altium_mcp/circuit_spec.txt")
     spec_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2032,7 +2043,7 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
         for line in read_altium_text(pm).splitlines():
             f = line.strip().split("|")
             if len(f) == 5 and f[0] == "PIN":
-                pin_map.setdefault(f[1], {})[f[2]] = [int(f[3]), int(f[4])]
+                pin_map.setdefault(f[1], {})[f[2]] = [int(f[3]) / 10000, int(f[4]) / 10000]
     result["pin_map"] = pin_map
     result["pin_map_note"] = ("Absolute electrical connection points. Route "
                               "wires from these, not from predicted offsets.")
@@ -2144,6 +2155,12 @@ async def check_schematic(ctx: Context, path: str, max_issues_per_sheet: int = 1
         above it. Both go above: file name on the top edge, designator a line
         (100 mil) above it, both bottom-left justified at the left edge.
       * label_orientation, label_off_wire, dangling_wire, wire_through_body.
+      * slanted_wire - a wire segment a little (1 um to half a grid) out of
+        level or plumb. It looks straight, but dragging a part on it turns it
+        diagonal. Usually a symbol whose pins are off the grid (then the
+        issue names the pin) or coordinates rounded to whole mils.
+        suggest.move_end/to give the end to move, at full precision:
+        delete_at the wire and add_wire it again with the new end.
       * text_overlap - a designator, parameter, net label or port text
         overlapping a wire, a pin, a part or other text. For part text the
         issue carries suggest.texts: positions (x, y, justification) for the
