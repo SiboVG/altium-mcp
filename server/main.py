@@ -26,7 +26,6 @@ import uuid
 from altium_files import read_altium_text, write_altium_text
 from exchange_lock import ExchangeLock
 from altium_install import find_altium_exe
-import pcb_rules
 import routing
 import sandbox
 import win_processes
@@ -3325,6 +3324,8 @@ async def create_pcb_rule(ctx: Context, rule_type: str, name: str, values: dict,
         str: JSON with the rule's name, descriptor, scopes, priority and
              whether it replaced an existing rule.
     """
+    import pcb_rules
+
     encoded, error = pcb_rules.encode_values(rule_type, values)
     if error:
         return json.dumps({"success": False, "error": error})
