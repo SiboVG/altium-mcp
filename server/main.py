@@ -28,7 +28,6 @@ from exchange_lock import ExchangeLock
 from altium_install import find_altium_exe
 import routing
 import sandbox
-import sch_edit
 import win_processes
 from outjob_parser import parse_outjob
 
@@ -2092,6 +2091,8 @@ async def edit_schematic(ctx: Context, sheet_path: str, operations: list, unit: 
     Returns:
         str: JSON with how many operations were applied and the errors.
     """
+    import sch_edit
+
     lines, error = sch_edit.encode_operations(operations, unit)
     if error:
         return json.dumps({"success": False, "error": error})
