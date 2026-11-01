@@ -26,7 +26,6 @@ import uuid
 from altium_files import read_altium_text, write_altium_text
 from exchange_lock import ExchangeLock
 from altium_install import find_altium_exe
-import pcb_shapes
 import routing
 import sandbox
 import win_processes
@@ -2798,6 +2797,8 @@ async def place_polygon_pour(ctx: Context, outline: list, layer: str, net: str =
              pieces it poured into (0 means it found no room, or every
              piece was dead copper and removed).
     """
+    import pcb_shapes
+
     points, error = pcb_shapes.outline_points(outline)
     if error:
         return json.dumps({"success": False, "error": error})
@@ -2842,6 +2843,8 @@ async def place_cutout(ctx: Context, outline: list, kind: str = "polygon", layer
         str: JSON with how many cutout regions were added and how many
              polygons were repoured.
     """
+    import pcb_shapes
+
     points, error = pcb_shapes.outline_points(outline)
     if error:
         return json.dumps({"success": False, "error": error})
