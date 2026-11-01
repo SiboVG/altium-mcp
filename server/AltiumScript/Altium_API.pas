@@ -447,6 +447,70 @@ begin
         Result := 'ERROR: No spec_file provided for create_footprints_batch';
 end;
 
+// The outline records of a polygon or cutout request: one string of 'x|y'
+// records in internal units separated by ';', read with JSONLineValue
+function RequestOutline(RequestData: TStringList; Points: TStringList): Boolean;
+var
+    i : Integer;
+begin
+    for i := 0 to RequestData.Count - 1 do
+        if Pos('"outline"', RequestData[i]) > 0 then
+            Points.Text := StringReplace(JSONLineValue(RequestData[i]), ';', #13#10, REPLACEALL);
+    Result := Points.Count >= 3;
+end;
+
+function RequestText(RequestData: TStringList; Key: String; Default: String): String;
+var
+    i : Integer;
+begin
+    Result := Default;
+    for i := 0 to RequestData.Count - 1 do
+        if Pos('"' + Key + '"', RequestData[i]) > 0 then
+            Result := JSONLineValue(RequestData[i]);
+end;
+
+// Function to execute create polygon pour
+function ExecuteCreatePolygonPour(RequestData: TStringList): String;
+var
+    Points : TStringList;
+begin
+    Points := TStringList.Create;
+    try
+        if not RequestOutline(RequestData, Points) then
+        begin
+            Result := 'ERROR: create_polygon_pour needs an outline of at least three corners';
+            Exit;
+        end;
+        Result := CreatePolygonPour(RequestText(RequestData, 'layer', ''), RequestText(RequestData, 'net', ''),
+            RequestText(RequestData, 'name', ''), RequestText(RequestData, 'hatch', 'solid'),
+            RequestText(RequestData, 'pour_over_same_net', 'true') = 'true',
+            RequestText(RequestData, 'remove_dead_copper', 'true') = 'true',
+            StrToInt(RequestText(RequestData, 'track_size', '0')),
+            StrToInt(RequestText(RequestData, 'grid', '0')), Points);
+    finally
+        Points.Free;
+    end;
+end;
+
+// Function to execute create cutout
+function ExecuteCreateCutout(RequestData: TStringList): String;
+var
+    Points : TStringList;
+begin
+    Points := TStringList.Create;
+    try
+        if not RequestOutline(RequestData, Points) then
+        begin
+            Result := 'ERROR: create_cutout needs an outline of at least three corners';
+            Exit;
+        end;
+        Result := CreateCutout(RequestText(RequestData, 'kind', 'polygon'),
+                               RequestText(RequestData, 'layer', ''), Points);
+    finally
+        Points.Free;
+    end;
+end;
+
 // Extract the create symbols batch logic
 function ExecuteCreateSymbolsBatch(RequestData: TStringList): String;
 var
@@ -654,6 +718,22 @@ begin
     for i := 0 to RequestData.Count - 1 do
     begin
         if (Pos('"outjob_path"', RequestData[i]) > 0) then
+        begin
+            Result := Trim(JSONLineValue(RequestData[i]));
+            break;
+        end;
+    end;
+end;
+
+// The board a PCB command names in "board_path", or '' to use the focused one
+function RequestBoardPath(RequestData: TStringList): String;
+var
+    i: Integer;
+begin
+    Result := '';
+    for i := 0 to RequestData.Count - 1 do
+    begin
+        if (Pos('"board_path"', RequestData[i]) > 0) then
         begin
             Result := Trim(JSONLineValue(RequestData[i]));
             break;
@@ -936,7 +1016,18 @@ begin
     // 'ERROR: ' prefix into success=false with this message.
     // An OutJob command that names its file needs no OutJob open in a
     // project: the command resolves and opens the named file itself.
-    if not (((CommandName = 'get_output_job_containers') or
+    // A command that names its board acts on that board, never on whichever
+    // one happens to have focus
+    if RequestBoardPath(RequestData) <> '' then
+    begin
+        FocusFailure := FocusBoardByPath(RequestBoardPath(RequestData));
+        if FocusFailure <> '' then
+        begin
+            Result := 'ERROR: ' + FocusFailure;
+            Exit;
+        end;
+    end
+    else if not (((CommandName = 'get_output_job_containers') or
              (CommandName = 'run_output_jobs')) and
             (RequestOutJobPath(RequestData) <> '')) then
     begin
@@ -1016,6 +1107,10 @@ begin
             Result := ExecuteGetERCViolations(RequestData);
         'get_board_summary':
             Result := GetBoardSummary(ROOT_DIR);
+        'create_polygon_pour':
+            Result := ExecuteCreatePolygonPour(RequestData);
+        'create_cutout':
+            Result := ExecuteCreateCutout(RequestData);
         'get_component_primitives':
             Result := ExecuteGetComponentPrimitives(RequestData);
         'get_routing_geometry':
