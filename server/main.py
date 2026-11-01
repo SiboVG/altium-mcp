@@ -28,6 +28,7 @@ from exchange_lock import ExchangeLock
 from altium_install import find_altium_exe
 import routing
 import sandbox
+import sch_edit
 import win_processes
 from outjob_parser import parse_outjob
 
@@ -142,7 +143,7 @@ MUTATING_COMMANDS = {
     "create_net_class", "create_schematic_symbol", "set_component_position",
     "move_components", "place_components", "create_symbols_batch", "build_circuit",
     "create_footprints_batch", "layout_duplicator", "layout_duplicator_apply",
-    "run_output_jobs", "create_pcb_footprint",
+    "run_output_jobs", "create_pcb_footprint", "edit_schematic",
 }
 
 # Present while a script the MCP launched is stuck (paused in Altium's
@@ -2036,6 +2037,79 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
     result["pin_map"] = pin_map
     result["pin_map_note"] = ("Absolute electrical connection points. Route "
                               "wires from these, not from predicted offsets.")
+    return json.dumps(result, indent=2)
+
+@_tool()
+async def edit_schematic(ctx: Context, sheet_path: str, operations: list, unit: str = "mil",
+                         save: bool = False) -> str:
+    """
+    Change an existing schematic sheet: move, rotate, delete or place parts,
+    set parameters, move designators and parameter text, add wires, net
+    labels, power ports, junctions and no-ERC markers, and delete objects.
+
+    The whole edit is one undo step in Altium (Ctrl+Z takes it all back),
+    and the user's own edits stay undoable. Operations run in order; one
+    that fails is reported in "errors" and the rest still run.
+
+    Coordinates are absolute sheet coordinates, Altium's origin at the
+    bottom left, in `unit` ("mil" or "mm"). check_schematic reports
+    positions and suggestions in the sheet's own unit (mm for a metric
+    grid), so pass the same unit to apply its suggestions directly.
+
+    Operations, each a dict with "op":
+      move_component    designator, [part], [x, y], [rotation 0/90/180/270],
+                        [mirror true/false]. x, y is the part's origin.
+      delete_component  designator, [part]
+      place_component   library (.SchLib path), symbol, designator, x, y,
+                        [rotation], [mirror], [comment]
+      set_parameter     designator, name, value, [part], [visible]
+                        (creates the parameter when missing)
+      move_text         designator, name ("Designator", "Comment" or a
+                        parameter), [part], [x, y], [justification 0-8:
+                        bottom-left, bottom-centre, bottom-right, middle-left,
+                        ..., top-right], [orientation 0-3], [visible]
+      add_wire          points [[x, y], ...] (a pin's connection point is
+                        its outer end, as build_schematic's pin_map gives)
+      add_net_label     x, y (on a wire), text, [orientation], [justification]
+      add_power_port    x, y, text, [style: bar, arrow, circle, wave,
+                        power_ground, signal_ground, earth], [orientation
+                        0-3, default 1 = up], [show_net_name]
+      add_junction      x, y
+      add_no_erc        x, y
+      delete_at         kind (wire, net_label, power_port, junction, no_erc,
+                        port, note), x, y, [text]: removes a wire passing
+                        through the point, or the object located there
+    "part" picks one part of a multi-part component (1 = A, ...).
+
+    Args:
+        sheet_path (str): Full path of the .SchDoc; opened if not open.
+        operations (list): The operations above, applied in order.
+        unit (str): "mil" (default) or "mm".
+        save (bool): Save the sheet afterwards (needed before
+            check_schematic, which reads the saved file). Otherwise it is
+            left modified for the user to review and save.
+
+    Returns:
+        str: JSON with how many operations were applied and the errors.
+    """
+    lines, error = sch_edit.encode_operations(operations, unit)
+    if error:
+        return json.dumps({"success": False, "error": error})
+    if not sheet_path.lower().endswith(".schdoc"):
+        return json.dumps({"success": False, "error": "sheet_path must be a .SchDoc"})
+    logger.info(f"Editing {sheet_path}: {len(lines)} operations")
+    # Part names and parameter values may hold text that is not plain ASCII
+    write_altium_text(EXCHANGE_DIR / "sch_edit_spec.txt", "\n".join(lines) + "\n")
+    response = await altium_bridge.execute_command("edit_schematic", {
+        "sheet_path": sheet_path, "save": bool(save)})
+    if not response.get("success", False):
+        return json.dumps({"success": False,
+                           "error": f"Failed to edit the sheet: {response.get('error', 'unknown error')}"})
+    result = response.get("result", {})
+    if isinstance(result, str):
+        return result
+    if result.get("errors"):
+        result["success"] = False
     return json.dumps(result, indent=2)
 
 @_tool(read_only=True)
